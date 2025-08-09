@@ -80,25 +80,25 @@ RgbdSlamNode::~RgbdSlamNode()
 //         cv_ptrRGB = cv_bridge::toCvShare(msgRGB);
 //         cv_ptrD = cv_bridge::toCvShare(msgD);
 //     } catch (cv_bridge::Exception& e) {
-//         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+//         RCLCPP_DEBUG(this->get_logger(), "cv_bridge exception: %s", e.what());
 //         return;
 //     }
 
 //     if (cv_ptrRGB->image.empty() || cv_ptrD->image.empty()) {
-//         RCLCPP_WARN(this->get_logger(), "Empty RGB or Depth image, skipping frame.");
+//         RCLCPP_DEBUG(this->get_logger(), "Empty RGB or Depth image, skipping frame.");
 //         return;
 //     }
 
 //     Sophus::SE3f Tcw = m_SLAM->TrackRGBD(cv_ptrRGB->image, cv_ptrD->image, Utility::StampToSec(msgRGB->header.stamp));
 //     if (!Tcw.matrix().allFinite() || Tcw.matrix().isApprox(Eigen::Matrix4f::Identity())) {
-//         RCLCPP_WARN(this->get_logger(), "Invalid or identity pose from SLAM, skipping frame.");
+//         RCLCPP_DEBUG(this->get_logger(), "Invalid or identity pose from SLAM, skipping frame.");
 //         return;
 //     }
 //     Eigen::Vector3f Tcwt = Tcw.translation();
-//     RCLCPP_INFO(this->get_logger(), "Tcwt Current pose: [%.3f, %.3f, %.3f]", Tcwt.x(), Tcwt.y(), Tcwt.z());
+//     RCLCPP_DEBUG(this->get_logger(), "Tcwt Current pose: [%.3f, %.3f, %.3f]", Tcwt.x(), Tcwt.y(), Tcwt.z());
 //     Sophus::SE3f Twc = Tcw.inverse();
 //     Eigen::Vector3f Twct = Twc.translation();
-//     RCLCPP_INFO(this->get_logger(), "Twct Current pose: [%.3f, %.3f, %.3f]", Twct.x(), Twct.y(), Twct.z());
+//     RCLCPP_DEBUG(this->get_logger(), "Twct Current pose: [%.3f, %.3f, %.3f]", Twct.x(), Twct.y(), Twct.z());
 //     // 相机 → 机体外参（Tbc：OpenCV 相机坐标系 → ROS base_link）
 //     Eigen::Matrix4f Tbc_matrix = Eigen::Matrix4f::Identity();
     
@@ -145,22 +145,22 @@ RgbdSlamNode::~RgbdSlamNode()
 //         cv_ptrRGB = cv_bridge::toCvShare(msgRGB);
 //         cv_ptrD = cv_bridge::toCvShare(msgD);
 //     } catch (cv_bridge::Exception& e) {
-//         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+//         RCLCPP_DEBUG(this->get_logger(), "cv_bridge exception: %s", e.what());
 //         return;
 //     }
 
 //     if (cv_ptrRGB->image.empty() || cv_ptrD->image.empty()) {
-//         RCLCPP_WARN(this->get_logger(), "Empty RGB or Depth image, skipping frame.");
+//         RCLCPP_DEBUG(this->get_logger(), "Empty RGB or Depth image, skipping frame.");
 //         return;
 //     }
     
 //     Sophus::SE3f Tcw = m_SLAM->TrackRGBD(cv_ptrRGB->image, cv_ptrD->image, Utility::StampToSec(msgRGB->header.stamp));
 //     if (!Tcw.matrix().allFinite() || Tcw.matrix().isApprox(Eigen::Matrix4f::Identity())) {
-//         RCLCPP_WARN(this->get_logger(), "Invalid or identity pose from SLAM, skipping frame.");
+//         RCLCPP_DEBUG(this->get_logger(), "Invalid or identity pose from SLAM, skipping frame.");
 //         return;
 //     }
 //     Eigen::Vector3f Tcwt = Tcw.translation();
-//     RCLCPP_INFO(this->get_logger(), "Tcwt Current pose: [%.3f, %.3f, %.3f]", Tcwt.x(), Tcwt.y(), Tcwt.z());
+//     RCLCPP_DEBUG(this->get_logger(), "Tcwt Current pose: [%.3f, %.3f, %.3f]", Tcwt.x(), Tcwt.y(), Tcwt.z());
 //     Sophus::SE3f Twc = Tcw.inverse();
 
 //     // // 相机 → 机体外参（添加180度旋转修正朝向）
@@ -205,12 +205,12 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
         cv_ptrRGB = cv_bridge::toCvShare(msgRGB);
         cv_ptrD = cv_bridge::toCvShare(msgD);
     } catch (cv_bridge::Exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+        RCLCPP_DEBUG(this->get_logger(), "cv_bridge exception: %s", e.what());
         return;
     }
 
     if (cv_ptrRGB->image.empty() || cv_ptrD->image.empty()) {
-        RCLCPP_WARN(this->get_logger(), "Empty RGB or Depth image, skipping frame.");
+        RCLCPP_DEBUG(this->get_logger(), "Empty RGB or Depth image, skipping frame.");
         return;
     }
 
@@ -227,7 +227,7 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
         if (imu_queue_.size() > 0) {
             double oldest_imu_time = imu_queue_.front().t;
             double newest_imu_time = imu_queue_.back().t;
-            RCLCPP_INFO(this->get_logger(), "IMU queue size: %lu, oldest: %.6f, newest: %.6f, frame: %.6f", 
+            RCLCPP_DEBUG(this->get_logger(), "IMU queue size: %lu, oldest: %.6f, newest: %.6f, frame: %.6f", 
                         imu_queue_.size(), oldest_imu_time, newest_imu_time, t_frame);
         }
         
@@ -239,7 +239,7 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
                 }
             }
             first_frame = false;
-            RCLCPP_INFO(this->get_logger(), "First frame: collected %lu IMU measurements", vImuMeas.size());
+            RCLCPP_DEBUG(this->get_logger(), "First frame: collected %lu IMU measurements", vImuMeas.size());
         } else {
             // 后续帧：收集从上一帧到当前帧之间的IMU数据
             for (const auto& imu_point : imu_queue_) {
@@ -247,7 +247,7 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
                     vImuMeas.push_back(imu_point);
                 }
             }
-            RCLCPP_INFO(this->get_logger(), "Frame: collected %lu IMU measurements between %.6f and %.6f", 
+            RCLCPP_DEBUG(this->get_logger(), "Frame: collected %lu IMU measurements between %.6f and %.6f", 
                        vImuMeas.size(), last_frame_time, t_frame);
             
             // 检查时间跨度是否足够
@@ -257,7 +257,7 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
                 
                 // 如果时间跨度太短，可能预积分会有问题
                 if (time_span < 0.005) {  // 少于5ms
-                    RCLCPP_WARN(this->get_logger(), "IMU time span too short (%.1f ms), may cause issues", time_span * 1000);
+                    RCLCPP_DEBUG(this->get_logger(), "IMU time span too short (%.1f ms), may cause issues", time_span * 1000);
                 }
             }
         }
@@ -278,7 +278,7 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
 
     // 检查IMU数据质量和数量
     if (vImuMeas.empty()) {
-        RCLCPP_WARN(this->get_logger(), "No IMU data available, skipping frame to avoid crash");
+        RCLCPP_DEBUG(this->get_logger(), "No IMU data available, skipping frame to avoid crash");
         // 在IMU-RGBD模式下，不能调用不带IMU参数的TrackRGBD
         // 这会导致内部状态不一致和段错误
         // 直接跳过这一帧，等待IMU数据
@@ -287,7 +287,7 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
     
     // 检查IMU数据的最小要求（需要至少2个测量值进行预积分）
     if (vImuMeas.size() < 2) {
-        RCLCPP_WARN(this->get_logger(), "Insufficient IMU data (%lu measurements, need at least 2), skipping frame", vImuMeas.size());
+        RCLCPP_DEBUG(this->get_logger(), "Insufficient IMU data (%lu measurements, need at least 2), skipping frame", vImuMeas.size());
         // IMU预积分需要至少2个测量值
         return;
     }
@@ -296,13 +296,13 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
     for (const auto& imu : vImuMeas) {
         if (!std::isfinite(imu.a(0)) || !std::isfinite(imu.a(1)) || !std::isfinite(imu.a(2)) ||
             !std::isfinite(imu.w(0)) || !std::isfinite(imu.w(1)) || !std::isfinite(imu.w(2))) {
-            RCLCPP_WARN(this->get_logger(), "Invalid IMU data in measurements, skipping frame to avoid crash");
+            RCLCPP_DEBUG(this->get_logger(), "Invalid IMU data in measurements, skipping frame to avoid crash");
             // 不能在IMU-RGBD模式下调用不带IMU的TrackRGBD
             return;
         }
     }
 
-    RCLCPP_INFO(this->get_logger(), "Processing frame with %lu IMU measurements", vImuMeas.size());
+    RCLCPP_DEBUG(this->get_logger(), "Processing frame with %lu IMU measurements", vImuMeas.size());
 
     // 使用 IMU 融合的位置估计
     Sophus::SE3f Tcw;
@@ -311,11 +311,11 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
         Tcw = m_SLAM->TrackRGBD(cv_ptrRGB->image, cv_ptrD->image, t_frame, vImuMeas);
         RCLCPP_DEBUG(this->get_logger(), "TrackRGBD completed successfully");
     } catch (const std::exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "IMU-Visual SLAM failed: %s", e.what());
+        RCLCPP_DEBUG(this->get_logger(), "IMU-Visual SLAM failed: %s", e.what());
         // 在IMU-RGBD模式下不能降级，直接跳过
         return;
     } catch (...) {
-        RCLCPP_ERROR(this->get_logger(), "IMU-Visual SLAM failed with unknown exception");
+        RCLCPP_DEBUG(this->get_logger(), "IMU-Visual SLAM failed with unknown exception");
         return;
     }
     // 使用新的位姿有效性检查和连续性保持逻辑
@@ -328,7 +328,7 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
         updatePoseContinuity(Tcw, t_frame);
         
         Eigen::Vector3f Tcwt = Tcw.translation();
-        RCLCPP_INFO(this->get_logger(), "[SLAM Valid] Tcwt: [%.3f, %.3f, %.3f]",
+        RCLCPP_DEBUG(this->get_logger(), "[SLAM Valid] Tcwt: [%.3f, %.3f, %.3f]",
                     Tcwt.x(), Tcwt.y(), Tcwt.z());
     } else {
         // SLAM位姿无效，使用预测位姿保持连续性
@@ -336,11 +336,11 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
             final_pose = predictPose(t_frame);
             
             Eigen::Vector3f predicted_t = final_pose.translation();
-            RCLCPP_WARN(this->get_logger(), "[SLAM Lost] Using predicted pose: [%.3f, %.3f, %.3f]",
+            RCLCPP_DEBUG(this->get_logger(), "[SLAM Lost] Using predicted pose: [%.3f, %.3f, %.3f]",
                        predicted_t.x(), predicted_t.y(), predicted_t.z());
         } else {
             // 没有历史位姿，跳过这一帧
-            RCLCPP_WARN(this->get_logger(), "No valid SLAM pose and no history, skipping frame.");
+            RCLCPP_DEBUG(this->get_logger(), "No valid SLAM pose and no history, skipping frame.");
             return;
         }
     }
@@ -396,7 +396,7 @@ void RgbdSlamNode::GrabIMU(const sensor_msgs::msg::Imu::ConstSharedPtr msg)
     // 检查IMU数据有效性
     if (!std::isfinite(msg->linear_acceleration.x) || !std::isfinite(msg->linear_acceleration.y) || !std::isfinite(msg->linear_acceleration.z) ||
         !std::isfinite(msg->angular_velocity.x) || !std::isfinite(msg->angular_velocity.y) || !std::isfinite(msg->angular_velocity.z)) {
-        RCLCPP_WARN(this->get_logger(), "Invalid IMU data detected, skipping");
+        RCLCPP_DEBUG(this->get_logger(), "Invalid IMU data detected, skipping");
         return;
     }
     
@@ -410,7 +410,7 @@ void RgbdSlamNode::GrabIMU(const sensor_msgs::msg::Imu::ConstSharedPtr msg)
         
         // 检查时间戳顺序
         if (!imu_queue_.empty() && imu_timestamp <= imu_queue_.back().t) {
-            RCLCPP_WARN(this->get_logger(), "IMU timestamp out of order: current=%.6f, last=%.6f", 
+            RCLCPP_DEBUG(this->get_logger(), "IMU timestamp out of order: current=%.6f, last=%.6f", 
                        imu_timestamp, imu_queue_.back().t);
         }
         
