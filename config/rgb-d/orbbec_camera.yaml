@@ -1,0 +1,96 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters for Orbbec Gemini 335L (RGB-D Mode)
+#--------------------------------------------------------------------------------------------
+Camera.type: "PinHole"
+
+# Intrinsic parameters (from /camera/color/camera_info)
+Camera.fx: 612.074
+Camera.fy: 612.167
+Camera.cx: 639.055
+Camera.cy: 354.956
+
+# Distortion parameters (rational_polynomial model)
+Camera.k1: 0.0
+Camera.k2: 0.0
+Camera.p1: 0.0
+Camera.p2: 0.0
+Camera.k3: 0.0
+
+# # Image resolution
+# Camera.width: 1280
+# Camera.height: 720
+
+# Image resolution
+Camera.width: 640
+Camera.height: 480
+
+# Camera frames per second 
+Camera.fps: 30.0
+
+# Color order (1=RGB, 0=BGR)
+Camera.RGB: 1
+
+# Close/Far threshold (baseline multiples)
+ThDepth: 40.0
+
+# Image scaling factor (1.0 = original size)
+Camera.imageScale: 1
+
+#--------------------------------------------------------------------------------------------
+# RGB-D Specific Parameters
+#--------------------------------------------------------------------------------------------
+# Baseline times fx (For Gemini 335L, baseline ~50mm = 0.05m)
+Camera.bf: 30.60  # 612.074 * 0.05
+
+# Depthmap scaling factor (millimeter to meter)
+DepthMapFactor: 1000.0
+
+
+
+#--------------------------------------------------------------------------------------------
+# ORB Feature Extraction Parameters
+#--------------------------------------------------------------------------------------------
+ORBextractor.nFeatures: 1200
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3
+Viewer.ViewpointX: 0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500
+
+#--------------------------------------------------------------------------------------------
+# Advanced Parameters (Optional)
+#--------------------------------------------------------------------------------------------
+# IMU calibration (disabled for pure RGB-D)
+Tbc: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: f
+   data: [1,0,0,0,
+         0,1,0,0,
+         0,0,1,0,
+         0,0,0,1]
+
+# Do not insert KFs when recently lost
+InsertKFsWhenLost: 0
+
+# IMU noise (Use those from VINS-mono)
+IMU.NoiseGyro: 1e-3 # 2.44e-4 #1e-3 # rad/s^0.5
+IMU.NoiseAcc: 1e-2 # 1.47e-3 #1e-2 # m/s^1.5
+IMU.GyroWalk: 1e-6 # rad/s^1.5
+IMU.AccWalk: 1e-4 # m/s^2.5
+IMU.Frequency: 200

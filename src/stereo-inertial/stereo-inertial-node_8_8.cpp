@@ -103,7 +103,7 @@ void StereoInertialNode::GrabImu(const ImuMsg::SharedPtr msg)
     bufMutex_.lock();
     imuBuf_.push(msg);
     // 在GrabImu中增加缓冲上限，避免内存爆炸
-    const size_t MAX_IMU_BUFFER = 3000;
+    const size_t MAX_IMU_BUFFER = 2000;
     if (imuBuf_.size() > MAX_IMU_BUFFER) {
         imuBuf_.pop(); // 丢弃最旧数据
     }
@@ -175,28 +175,12 @@ void StereoInertialNode::SyncWithImu()
             //                imgLeftBuf_.size(), imgRightBuf_.size(), imuBuf_.size());
             tImLeft = Utility::StampToSec(imgLeftBuf_.front()->header.stamp);
             tImRight = Utility::StampToSec(imgRightBuf_.front()->header.stamp);
-            
+
             bufMutexRight_.lock();
-            
-            if (!imgRightBuf_.empty()) {
-                auto img_msg = imgRightBuf_.front();
-                if (img_msg->header.stamp.sec == 0 && img_msg->header.stamp.nanosec == 0) {
-                    RCLCPP_WARN(this->get_logger(), "Right image stamp is zero!");
-                }
-            }
-            if (!imgLeftBuf_.empty()) {
-                auto img_msg = imgLeftBuf_.front();
-                if (img_msg->header.stamp.sec == 0 && img_msg->header.stamp.nanosec == 0) {
-                    RCLCPP_WARN(this->get_logger(), "imgLeftBuf_ image stamp is zero!");
-                }
-            }
             while ((tImLeft - tImRight) > maxTimeDiff && imgRightBuf_.size() > 1)
             {
                 imgRightBuf_.pop();
                 tImRight = Utility::StampToSec(imgRightBuf_.front()->header.stamp);
-                if(tImRight == 0){
-                    RCLCPP_WARN(this->get_logger(), "imgRightBuf_ image stamp is zero!");
-                }
             }
             bufMutexRight_.unlock();
 
@@ -205,59 +189,72 @@ void StereoInertialNode::SyncWithImu()
             {
                 imgLeftBuf_.pop();
                 tImLeft = Utility::StampToSec(imgLeftBuf_.front()->header.stamp);
-                if(tImLeft == 0){
-                    RCLCPP_WARN(this->get_logger(), "tImLeft image stamp is zero!");
-                }
             }
             bufMutexLeft_.unlock();
 
             if ((tImLeft - tImRight) > maxTimeDiff || (tImRight - tImLeft) > maxTimeDiff)
             {
-                // std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
+                std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
 
-                // std::swap(imuBuf_, emptyQueue);
-                // std::cout << "big time difference" << std::endl;
+                std::swap(imuBuf_, emptyQueue);
+                std::cout << "big time difference" << std::endl;
                 continue;
             }
             if (tImLeft > Utility::StampToSec(imuBuf_.back()->header.stamp)){
-                // std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
-                // std::swap(imuBuf_, emptyQueue);
+                std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
+                std::swap(imuBuf_, emptyQueue);
                 continue;
             }
 
             bufMutexLeft_.lock();
-            bufMutexRight_.lock();
-            auto right_msg = std::make_shared<sensor_msgs::msg::Image>(*imgRightBuf_.front());
-        
-            right_msg->header.stamp = imgLeftBuf_.front()->header.stamp;
-            
-           
             imLeft = GetImage(imgLeftBuf_.front());
-            imRight = GetImage(right_msg);
-     
-            
-            imgRightBuf_.pop();
             imgLeftBuf_.pop();
-
             bufMutexLeft_.unlock();
+
+            bufMutexRight_.lock();
+            imRight = GetImage(imgRightBuf_.front());
+            imgRightBuf_.pop();
             bufMutexRight_.unlock();
-    
+            //RCLCPP_INFO(this->get_logger(), "Grabbed images at time: %.3f", tImLeft);
             vector<ORB_SLAM3::IMU::Point> vImuMeas;
 
             // 在SyncWithImu线程中修改IMU处理逻辑
             bufMutex_.lock();
+            if (imuBuf_.size() < 30) {  // 确保有足够IMU数据（约10ms@200Hz）
+                bufMutex_.unlock();
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                                "Waiting for more IMU data (current: %zu)", imuBuf_.size());
+                std::this_thread::sleep_for(5ms);
+                continue;
+            }
 
             vImuMeas.clear();
+            const double imu_end_time = tImLeft + 0.05;  // 比图像时间稍延后
+
+            double min_acc_magnitude = std::numeric_limits<double>::max();
+            double max_acc_magnitude = 0.0;
+            
             while (!imuBuf_.empty() && Utility::StampToSec(imuBuf_.front()->header.stamp) <= tImLeft)
             {
                 double t = Utility::StampToSec(imuBuf_.front()->header.stamp);
                 auto msg = imuBuf_.front();
     
+                // 检查NaN/inf
+                if (!std::isfinite(msg->linear_acceleration.x) || 
+                    !std::isfinite(msg->linear_acceleration.y) || 
+                    !std::isfinite(msg->linear_acceleration.z) ||
+                    !std::isfinite(msg->angular_velocity.x) || 
+                    !std::isfinite(msg->angular_velocity.y) || 
+                    !std::isfinite(msg->angular_velocity.z)) {
+                    RCLCPP_WARN(this->get_logger(), "Invalid IMU data (NaN/inf) at time %.3f, skipping...", t);
+                    imuBuf_.pop();
+                    continue;
+                }
+
                 cv::Point3f acc(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
 
                 cv::Point3f gyr(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
-                // RCLCPP_INFO(this->get_logger(), "IMU data at time %.3f: acc=(%.3f, %.3f, %.3f), gyr=(%.3f, %.3f, %.3f)", 
-                //             t, acc.x, acc.y, acc.z, gyr.x, gyr.y, gyr.z);
+
             
 
                 vImuMeas.push_back(ORB_SLAM3::IMU::Point(acc, gyr, t));
@@ -267,10 +264,7 @@ void StereoInertialNode::SyncWithImu()
             }
    
             bufMutex_.unlock();
-            if(vImuMeas.size() <= 0){
-                RCLCPP_INFO(this->get_logger(), "AvImuMeas.size() <= 15");
-                continue;
-            }
+
             if (bClahe_)
             {
                 RCLCPP_INFO(this->get_logger(), "Applying CLAHE to images");
@@ -285,29 +279,11 @@ void StereoInertialNode::SyncWithImu()
                 cv::remap(imRight, imRight, M1r_, M2r_, cv::INTER_LINEAR);
             }
 
-            
-            // 检查图像数据是否有效
-            if (imLeft.empty() || imRight.empty()) {
-                RCLCPP_ERROR(this->get_logger(), "Empty image data!");
-                return;
-            }
-
-            // 检查时间戳是否为 nan
-            if (std::isnan(tImLeft) || std::isnan(tImRight)) {
-                RCLCPP_ERROR(this->get_logger(), "Timestamp is NaN! Left: %f, Right: %f", tImLeft, tImRight);
-                return;
-            }
-
-            // 检查 IMU 数据是否有效
-            for (const auto &imu : vImuMeas) {
-                if (std::isnan(imu.w.x()) || std::isnan(imu.w.y()) || std::isnan(imu.w.z()) ||
-                    std::isnan(imu.a.x()) || std::isnan(imu.a.y()) || std::isnan(imu.a.z())) {
-                    RCLCPP_ERROR(this->get_logger(), "IMU data contains NaN!");
-                    return;
-                }
-            }
+            // RCLCPP_INFO(this->get_logger(), "IMU measurements: %zu, time range: [%.3f, %.3f]", 
+            //                 vImuMeas.size(), vImuMeas.front().t, vImuMeas.back().t);
+    
             Sophus::SE3f Tcw = SLAM_->TrackStereo(imLeft, imRight, tImLeft, vImuMeas);
-
+          
             // 检查SLAM跟踪状态
             int tracking_state = SLAM_->GetTrackingState();
             // RCLCPP_INFO(this->get_logger(), "SLAM Tracking State: %d", tracking_state);
@@ -322,10 +298,10 @@ void StereoInertialNode::SyncWithImu()
                 default: state_str = "UNKNOWN"; break;
             }
             
-            
+      
             rclcpp::Time stamp = rclcpp::Time(static_cast<int64_t>(tImLeft * 1e9));// 安全时间戳
             PublishTransform(Tcw, stamp, tracking_state);
-
+            
             
             std::chrono::milliseconds tSleep(1);
             std::this_thread::sleep_for(tSleep);

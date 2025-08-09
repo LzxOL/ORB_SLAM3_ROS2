@@ -28,17 +28,10 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
     // 声明参数
     this->declare_parameter<std::string>("map_frame_id", "map");
     this->declare_parameter<std::string>("base_frame_id", "tita4264886/base_link");
-    this->declare_parameter<bool>("use_pose_prediction", true);
-    this->declare_parameter<double>("max_prediction_time", 1.0);
 
     // 获取参数
     this->get_parameter("map_frame_id", map_frame_id_);
     this->get_parameter("base_frame_id", base_frame_id_);
-    this->get_parameter("use_pose_prediction", use_pose_prediction_);
-    
-    double max_prediction_time;
-    this->get_parameter("max_prediction_time", max_prediction_time);
-    max_prediction_time_ = max_prediction_time;
 
     // 初始化订阅器
     rgb_sub = std::make_shared<message_filters::Subscriber<ImageMsg>>(this, "/camera/color/image_raw");
@@ -58,14 +51,6 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
         
     // 初始化 TF 广播器
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
-    
-    // 初始化位姿连续性相关变量
-    has_valid_pose_ = false;
-    last_valid_pose_time_ = 0.0;
-    velocity_update_time_ = 0.0;
-    use_pose_prediction_ = true;  // 启用位姿预测
-    velocity_ = Eigen::Vector3f::Zero();
-    last_valid_pose_ = Sophus::SE3f();  // 初始化为单位变换
 }
 
 RgbdSlamNode::~RgbdSlamNode()
@@ -318,40 +303,17 @@ void RgbdSlamNode::GrabRGBD(const ImageMsg::SharedPtr msgRGB, const ImageMsg::Sh
         RCLCPP_ERROR(this->get_logger(), "IMU-Visual SLAM failed with unknown exception");
         return;
     }
-    // 使用新的位姿有效性检查和连续性保持逻辑
-    Sophus::SE3f final_pose;
-    bool slam_pose_valid = isPoseValid(Tcw);
-    
-    if (slam_pose_valid) {
-        // SLAM位姿有效，使用SLAM结果
-        final_pose = Tcw;
-        updatePoseContinuity(Tcw, t_frame);
-        
-        Eigen::Vector3f Tcwt = Tcw.translation();
-        RCLCPP_INFO(this->get_logger(), "[SLAM Valid] Tcwt: [%.3f, %.3f, %.3f]",
-                    Tcwt.x(), Tcwt.y(), Tcwt.z());
-    } else {
-        // SLAM位姿无效，使用预测位姿保持连续性
-        if (has_valid_pose_) {
-            final_pose = predictPose(t_frame);
-            
-            Eigen::Vector3f predicted_t = final_pose.translation();
-            RCLCPP_WARN(this->get_logger(), "[SLAM Lost] Using predicted pose: [%.3f, %.3f, %.3f]",
-                       predicted_t.x(), predicted_t.y(), predicted_t.z());
-        } else {
-            // 没有历史位姿，跳过这一帧
-            RCLCPP_WARN(this->get_logger(), "No valid SLAM pose and no history, skipping frame.");
-            return;
-        }
+    if (!Tcw.matrix().allFinite() || Tcw.matrix().isApprox(Eigen::Matrix4f::Identity())) {
+        RCLCPP_WARN(this->get_logger(), "Invalid or identity pose from SLAM, skipping frame.");
+        return;
     }
 
-    // 始终输出连续的世界坐标位姿
-    Eigen::Vector3f world_position = final_pose.translation();
-    RCLCPP_INFO(this->get_logger(), "[World Continuous] Position: [%.3f, %.3f, %.3f]",
-                world_position.x(), world_position.y(), world_position.z());
+    Eigen::Vector3f Tcwt = Tcw.translation();
+    RCLCPP_INFO(this->get_logger(), "[With IMU] SLAM Tcwt: [%.3f, %.3f, %.3f]",
+                Tcwt.x(), Tcwt.y(), Tcwt.z());
 
     // 发布变换
-    publishTransform(final_pose, msgRGB->header.stamp);
+    publishTransform(Tcw, msgRGB->header.stamp);
 }
 
 void RgbdSlamNode::publishTransform(const Sophus::SE3f& Tcw, const builtin_interfaces::msg::Time& timestamp)
@@ -428,91 +390,4 @@ void RgbdSlamNode::GrabIMU(const sensor_msgs::msg::Imu::ConstSharedPtr msg)
                         imu_queue_.size(), imu_timestamp);
         }
     }
-}
-
-// 检查位姿是否有效
-bool RgbdSlamNode::isPoseValid(const Sophus::SE3f& pose)
-{
-    // 检查矩阵是否有限
-    if (!pose.matrix().allFinite()) {
-        return false;
-    }
-    
-    // 检查是否为单位矩阵（表示无效位姿）
-    if (pose.matrix().isApprox(Eigen::Matrix4f::Identity(), 1e-6f)) {
-        return false;
-    }
-    
-    // 检查平移部分是否合理（避免异常大的值）
-    Eigen::Vector3f translation = pose.translation();
-    float max_translation = 1000.0f;  // 最大平移距离（米）
-    if (translation.norm() > max_translation) {
-        return false;
-    }
-    
-    // 检查旋转矩阵是否正交
-    Eigen::Matrix3f R = pose.rotationMatrix();
-    if (std::abs(R.determinant() - 1.0f) > 0.1f) {
-        return false;
-    }
-    
-    return true;
-}
-
-// 更新位姿连续性
-void RgbdSlamNode::updatePoseContinuity(const Sophus::SE3f& current_pose, double timestamp)
-{
-    std::lock_guard<std::mutex> lock(pose_mutex_);
-    
-    if (has_valid_pose_) {
-        // 计算速度
-        double dt = timestamp - last_valid_pose_time_;
-        if (dt > 0.001) {  // 避免除零
-            Eigen::Vector3f current_translation = current_pose.translation();
-            Eigen::Vector3f last_translation = last_valid_pose_.translation();
-            velocity_ = (current_translation - last_translation) / dt;
-            velocity_update_time_ = timestamp;
-            
-            // 限制速度的合理范围（避免异常值）
-            float max_velocity = 10.0f;  // 最大速度 10 m/s
-            if (velocity_.norm() > max_velocity) {
-                velocity_ = velocity_.normalized() * max_velocity;
-            }
-        }
-    }
-    
-    // 更新最后有效位姿
-    last_valid_pose_ = current_pose;
-    last_valid_pose_time_ = timestamp;
-    has_valid_pose_ = true;
-}
-
-// 预测当前位姿
-Sophus::SE3f RgbdSlamNode::predictPose(double current_time)
-{
-    std::lock_guard<std::mutex> lock(pose_mutex_);
-    
-    if (!has_valid_pose_ || !use_pose_prediction_) {
-        return last_valid_pose_;
-    }
-    
-    double dt = current_time - last_valid_pose_time_;
-    
-    // 如果时间差太大，不进行预测
-    if (dt > max_prediction_time_) {
-        return last_valid_pose_;
-    }
-    
-    // 使用恒速模型预测位置
-    Eigen::Vector3f predicted_translation = last_valid_pose_.translation() + velocity_ * dt;
-    
-    // 保持旋转不变（可以根据需要添加角速度预测）
-    Eigen::Matrix3f predicted_rotation = last_valid_pose_.rotationMatrix();
-    
-    // 构造预测位姿
-    Eigen::Matrix4f predicted_matrix = Eigen::Matrix4f::Identity();
-    predicted_matrix.block<3,3>(0,0) = predicted_rotation;
-    predicted_matrix.block<3,1>(0,3) = predicted_translation;
-    
-    return Sophus::SE3f(predicted_matrix);
 }

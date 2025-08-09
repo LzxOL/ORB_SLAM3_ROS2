@@ -1,0 +1,158 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters. Adjust them!
+#--------------------------------------------------------------------------------------------
+Camera.type: "PinHole"
+
+# Camera calibration and distortion parameters (OpenCV) (equal for both cameras after stereo rectification)
+Camera.fx: 478.8778  # K[0]
+Camera.fy: 479.0356  # K[4]
+Camera.cx: 479.0595  # K[2]
+Camera.cy: 295.4586  # K[5]
+
+Camera.k1: 0.0
+Camera.k2: 0.0
+Camera.p1: 0.0
+Camera.p2: 0.0
+
+Camera.width: 960
+Camera.height: 600
+
+# Camera frames per second 
+Camera.fps: 60.0
+
+# stereo baseline times fx
+Camera.bf: 71.7912
+
+# Color order of the images (0: BGR, 1: RGB. It is ignored if images are grayscale)
+Camera.RGB: 1
+
+# Close/Far threshold. Baseline times.
+ThDepth: 60.0 # 35
+
+# Transformation from camera 0 to body-frame (imu)
+# 相机到IMU的变换矩阵（Tbc）
+Tbc: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: f
+   data: [1, 0, 0, 0,    # 需根据实际安装位置标定
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1]
+
+# IMU noise
+IMU.NoiseGyro: 1.7e-04 # 1.6968e-04 
+IMU.NoiseAcc: 2.0e-03 # 2.0000e-3
+IMU.GyroWalk: 1.9393e-05 
+IMU.AccWalk: 3.e-03 # 3.0000e-3
+IMU.Frequency: 200
+
+
+
+# Transformation from camera 0 to body-frame (imu)
+# # 相机到IMU的变换矩阵（Tbc）
+# # 基于IMU数据分析：z轴约9.742m/s²，接近重力，说明IMU的z轴向上
+# # 需要根据实际安装情况进一步精确标定
+# Tbc: !!opencv-matrix
+#    rows: 4
+#    cols: 4
+#    dt: f
+#    data: [1, 0, 0, 0,    # 需根据实际安装位置标定
+#           0, 1, 0, 0,
+#           0, 0, 1, 0,
+#           0, 0, 0, 1]
+
+# # IMU noise (基于静止状态数据标定)
+# # 陀螺仪噪声：基于静止时的角速度标准差
+# IMU.NoiseGyro: 6.0e-03 # 静止时角速度约0.006 rad/s，设为噪声水平
+# IMU.NoiseAcc: 2.5e-01 # 静止时加速度噪声约0.25 m/s²
+# # 随机游走参数（保守估计）
+# IMU.GyroWalk: 1.0e-04 # 陀螺仪随机游走
+# IMU.AccWalk: 1.0e-02 # 加速度计随机游走
+# # IMU频率（根据实际数据调整）
+# IMU.Frequency: 200 # 从终端数据看，实际频率约200Hz
+
+
+
+
+#--------------------------------------------------------------------------------------------
+# Stereo Rectification. Only if you need to pre-rectify the images.
+# Camera.fx, .fy, etc must be the same as in LEFT.P
+#--------------------------------------------------------------------------------------------
+LEFT.height: 600
+LEFT.width: 960
+LEFT.D: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [19.6534, 12.8240, -0.0003, 8.6813e-05, 0.6549]  # 取d的前5个值
+LEFT.K: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [478.8778, 0.0, 479.0595, 0.0, 479.0356, 295.4586, 0.0, 0.0, 1.0]
+LEFT.R: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [0.999999, 0.000325, -0.000628, -0.000330, 0.999962, -0.008756, 0.000625, 0.008757, 0.999961]
+LEFT.P: !!opencv-matrix
+   rows: 3
+   cols: 4
+   dt: d
+   data: [479.1772, 4.3506, 478.7402, -71.6129, 0.0, 481.6045, 291.2525, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+RIGHT.height: 600
+RIGHT.width: 960
+RIGHT.D: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [0.8015, 0.1888, 6.0860e-05, 8.6190e-05, 0.0074]  # 取d的前5个值
+RIGHT.K: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [481.2510, 0.0, 475.9995, 0.0, 481.3808, 301.0490, 0.0, 0.0, 1.0]
+RIGHT.P: !!opencv-matrix
+   rows: 3
+   cols: 4
+   dt: d
+   data: [481.5485, 4.3246, 475.6789, -71.9695, 0.0, 483.9985, 296.8222, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+
+# ORB Extractor: Number of features per image
+ORBextractor.nFeatures: 1200
+
+# ORB Extractor: Scale factor between levels in the scale pyramid 	
+ORBextractor.scaleFactor: 1.2
+
+# ORB Extractor: Number of levels in the scale pyramid	
+ORBextractor.nLevels: 8
+
+# ORB Extractor: Fast threshold
+# Image is divided in a grid. At each cell FAST are extracted imposing a minimum response.
+# Firstly we impose iniThFAST. If no corners are detected we impose a lower value minThFAST
+# You can lower these values if your images have low contrast			
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize:2
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3
+Viewer.ViewpointX: 0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500
+
