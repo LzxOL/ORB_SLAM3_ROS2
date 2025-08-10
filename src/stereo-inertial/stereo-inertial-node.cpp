@@ -159,179 +159,179 @@ cv::Mat StereoInertialNode::GetImage(const ImageMsg::SharedPtr msg)
     }
 }
 
-void StereoInertialNode::SyncWithImu()
-{
-    const double maxTimeDiff = 0.08;
+// void StereoInertialNode::SyncWithImu()
+// {
+//     const double maxTimeDiff = 0.08;
 
-    while (1)
-    {
+//     while (1)
+//     {
         
-        cv::Mat imLeft, imRight;
-        double tImLeft = 0, tImRight = 0;
+//         cv::Mat imLeft, imRight;
+//         double tImLeft = 0, tImRight = 0;
         
-        if (!imgLeftBuf_.empty() && !imgRightBuf_.empty() && !imuBuf_.empty())
-        {
-            // RCLCPP_INFO(this->get_logger(), "SyncWithImu: %zu left images, %zu right images, %zu IMU messages", 
-            //                imgLeftBuf_.size(), imgRightBuf_.size(), imuBuf_.size());
-            tImLeft = Utility::StampToSec(imgLeftBuf_.front()->header.stamp);
-            tImRight = Utility::StampToSec(imgRightBuf_.front()->header.stamp);
+//         if (!imgLeftBuf_.empty() && !imgRightBuf_.empty() && !imuBuf_.empty())
+//         {
+//             // RCLCPP_INFO(this->get_logger(), "SyncWithImu: %zu left images, %zu right images, %zu IMU messages", 
+//             //                imgLeftBuf_.size(), imgRightBuf_.size(), imuBuf_.size());
+//             tImLeft = Utility::StampToSec(imgLeftBuf_.front()->header.stamp);
+//             tImRight = Utility::StampToSec(imgRightBuf_.front()->header.stamp);
             
-            bufMutexRight_.lock();
+//             bufMutexRight_.lock();
             
-            if (!imgRightBuf_.empty()) {
-                auto img_msg = imgRightBuf_.front();
-                if (img_msg->header.stamp.sec == 0 && img_msg->header.stamp.nanosec == 0) {
-                    RCLCPP_WARN(this->get_logger(), "Right image stamp is zero!");
-                }
-            }
-            if (!imgLeftBuf_.empty()) {
-                auto img_msg = imgLeftBuf_.front();
-                if (img_msg->header.stamp.sec == 0 && img_msg->header.stamp.nanosec == 0) {
-                    RCLCPP_WARN(this->get_logger(), "imgLeftBuf_ image stamp is zero!");
-                }
-            }
-            while ((tImLeft - tImRight) > maxTimeDiff && imgRightBuf_.size() > 1)
-            {
-                imgRightBuf_.pop();
-                tImRight = Utility::StampToSec(imgRightBuf_.front()->header.stamp);
-                if(tImRight == 0){
-                    RCLCPP_WARN(this->get_logger(), "imgRightBuf_ image stamp is zero!");
-                }
-            }
-            bufMutexRight_.unlock();
+//             if (!imgRightBuf_.empty()) {
+//                 auto img_msg = imgRightBuf_.front();
+//                 if (img_msg->header.stamp.sec == 0 && img_msg->header.stamp.nanosec == 0) {
+//                     RCLCPP_WARN(this->get_logger(), "Right image stamp is zero!");
+//                 }
+//             }
+//             if (!imgLeftBuf_.empty()) {
+//                 auto img_msg = imgLeftBuf_.front();
+//                 if (img_msg->header.stamp.sec == 0 && img_msg->header.stamp.nanosec == 0) {
+//                     RCLCPP_WARN(this->get_logger(), "imgLeftBuf_ image stamp is zero!");
+//                 }
+//             }
+//             while ((tImLeft - tImRight) > maxTimeDiff && imgRightBuf_.size() > 1)
+//             {
+//                 imgRightBuf_.pop();
+//                 tImRight = Utility::StampToSec(imgRightBuf_.front()->header.stamp);
+//                 if(tImRight == 0){
+//                     RCLCPP_WARN(this->get_logger(), "imgRightBuf_ image stamp is zero!");
+//                 }
+//             }
+//             bufMutexRight_.unlock();
 
-            bufMutexLeft_.lock();
-            while ((tImRight - tImLeft) > maxTimeDiff && imgLeftBuf_.size() > 1)
-            {
-                imgLeftBuf_.pop();
-                tImLeft = Utility::StampToSec(imgLeftBuf_.front()->header.stamp);
-                if(tImLeft == 0){
-                    RCLCPP_WARN(this->get_logger(), "tImLeft image stamp is zero!");
-                }
-            }
-            bufMutexLeft_.unlock();
+//             bufMutexLeft_.lock();
+//             while ((tImRight - tImLeft) > maxTimeDiff && imgLeftBuf_.size() > 1)
+//             {
+//                 imgLeftBuf_.pop();
+//                 tImLeft = Utility::StampToSec(imgLeftBuf_.front()->header.stamp);
+//                 if(tImLeft == 0){
+//                     RCLCPP_WARN(this->get_logger(), "tImLeft image stamp is zero!");
+//                 }
+//             }
+//             bufMutexLeft_.unlock();
 
-            if ((tImLeft - tImRight) > maxTimeDiff || (tImRight - tImLeft) > maxTimeDiff)
-            {
-                // std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
+//             if ((tImLeft - tImRight) > maxTimeDiff || (tImRight - tImLeft) > maxTimeDiff)
+//             {
+//                 // std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
 
-                // std::swap(imuBuf_, emptyQueue);
-                // std::cout << "big time difference" << std::endl;
-                continue;
-            }
-            if (tImLeft > Utility::StampToSec(imuBuf_.back()->header.stamp)){
-                // std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
-                // std::swap(imuBuf_, emptyQueue);
-                continue;
-            }
+//                 // std::swap(imuBuf_, emptyQueue);
+//                 // std::cout << "big time difference" << std::endl;
+//                 continue;
+//             }
+//             if (tImLeft > Utility::StampToSec(imuBuf_.back()->header.stamp)){
+//                 // std::queue<std::shared_ptr<sensor_msgs::msg::Imu>> emptyQueue;
+//                 // std::swap(imuBuf_, emptyQueue);
+//                 continue;
+//             }
 
-            bufMutexLeft_.lock();
-            bufMutexRight_.lock();
-            auto right_msg = std::make_shared<sensor_msgs::msg::Image>(*imgRightBuf_.front());
+//             bufMutexLeft_.lock();
+//             bufMutexRight_.lock();
+//             auto right_msg = std::make_shared<sensor_msgs::msg::Image>(*imgRightBuf_.front());
         
-            right_msg->header.stamp = imgLeftBuf_.front()->header.stamp;
+//             right_msg->header.stamp = imgLeftBuf_.front()->header.stamp;
             
            
-            imLeft = GetImage(imgLeftBuf_.front());
-            imRight = GetImage(right_msg);
+//             imLeft = GetImage(imgLeftBuf_.front());
+//             imRight = GetImage(right_msg);
      
             
-            imgRightBuf_.pop();
-            imgLeftBuf_.pop();
+//             imgRightBuf_.pop();
+//             imgLeftBuf_.pop();
 
-            bufMutexLeft_.unlock();
-            bufMutexRight_.unlock();
+//             bufMutexLeft_.unlock();
+//             bufMutexRight_.unlock();
     
-            vector<ORB_SLAM3::IMU::Point> vImuMeas;
+//             vector<ORB_SLAM3::IMU::Point> vImuMeas;
 
-            // 在SyncWithImu线程中修改IMU处理逻辑
-            bufMutex_.lock();
+//             // 在SyncWithImu线程中修改IMU处理逻辑
+//             bufMutex_.lock();
 
-            vImuMeas.clear();
-            while (!imuBuf_.empty() && Utility::StampToSec(imuBuf_.front()->header.stamp) <= tImLeft)
-            {
-                double t = Utility::StampToSec(imuBuf_.front()->header.stamp);
-                auto msg = imuBuf_.front();
+//             vImuMeas.clear();
+//             while (!imuBuf_.empty() && Utility::StampToSec(imuBuf_.front()->header.stamp) <= tImLeft)
+//             {
+//                 double t = Utility::StampToSec(imuBuf_.front()->header.stamp);
+//                 auto msg = imuBuf_.front();
     
-                cv::Point3f acc(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
+//                 cv::Point3f acc(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
 
-                cv::Point3f gyr(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
-                // RCLCPP_INFO(this->get_logger(), "IMU data at time %.3f: acc=(%.3f, %.3f, %.3f), gyr=(%.3f, %.3f, %.3f)", 
-                //             t, acc.x, acc.y, acc.z, gyr.x, gyr.y, gyr.z);
+//                 cv::Point3f gyr(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+//                 // RCLCPP_INFO(this->get_logger(), "IMU data at time %.3f: acc=(%.3f, %.3f, %.3f), gyr=(%.3f, %.3f, %.3f)", 
+//                 //             t, acc.x, acc.y, acc.z, gyr.x, gyr.y, gyr.z);
             
 
-                vImuMeas.push_back(ORB_SLAM3::IMU::Point(acc, gyr, t));
-                imuBuf_.pop();
-                if(vImuMeas.size() == 60)
-                    break;
-            }
+//                 vImuMeas.push_back(ORB_SLAM3::IMU::Point(acc, gyr, t));
+//                 imuBuf_.pop();
+//                 if(vImuMeas.size() == 60)
+//                     break;
+//             }
    
-            bufMutex_.unlock();
-            if(vImuMeas.size() <= 0){
-                RCLCPP_INFO(this->get_logger(), "AvImuMeas.size() <= 15");
-                continue;
-            }
-            if (bClahe_)
-            {
-                RCLCPP_INFO(this->get_logger(), "Applying CLAHE to images");
-                clahe_->apply(imLeft, imLeft);
-                clahe_->apply(imRight, imRight);
-            }
+//             bufMutex_.unlock();
+//             if(vImuMeas.size() <= 0){
+//                 RCLCPP_INFO(this->get_logger(), "AvImuMeas.size() <= 15");
+//                 continue;
+//             }
+//             if (bClahe_)
+//             {
+//                 RCLCPP_INFO(this->get_logger(), "Applying CLAHE to images");
+//                 clahe_->apply(imLeft, imLeft);
+//                 clahe_->apply(imRight, imRight);
+//             }
 
-            if (doRectify_)
-            {
-                RCLCPP_INFO(this->get_logger(), "Applying stereo rectification");
-                cv::remap(imLeft, imLeft, M1l_, M2l_, cv::INTER_LINEAR);
-                cv::remap(imRight, imRight, M1r_, M2r_, cv::INTER_LINEAR);
-            }
-
-            
-            // 检查图像数据是否有效
-            if (imLeft.empty() || imRight.empty()) {
-                RCLCPP_ERROR(this->get_logger(), "Empty image data!");
-                return;
-            }
-
-            // 检查时间戳是否为 nan
-            if (std::isnan(tImLeft) || std::isnan(tImRight)) {
-                RCLCPP_ERROR(this->get_logger(), "Timestamp is NaN! Left: %f, Right: %f", tImLeft, tImRight);
-                return;
-            }
-
-            // 检查 IMU 数据是否有效
-            for (const auto &imu : vImuMeas) {
-                if (std::isnan(imu.w.x()) || std::isnan(imu.w.y()) || std::isnan(imu.w.z()) ||
-                    std::isnan(imu.a.x()) || std::isnan(imu.a.y()) || std::isnan(imu.a.z())) {
-                    RCLCPP_ERROR(this->get_logger(), "IMU data contains NaN!");
-                    return;
-                }
-            }
-            Sophus::SE3f Tcw = SLAM_->TrackStereo(imLeft, imRight, tImLeft, vImuMeas);
-
-            // 检查SLAM跟踪状态
-            int tracking_state = SLAM_->GetTrackingState();
-            // RCLCPP_INFO(this->get_logger(), "SLAM Tracking State: %d", tracking_state);
-            std::string state_str;
-            switch(tracking_state) {
-                case 0: state_str = "SYSTEM_NOT_READY"; break;
-                case 1: state_str = "NO_IMAGES_YET"; break;
-                case 2: state_str = "NOT_INITIALIZED"; break;
-                case 3: state_str = "OK"; break;
-                case 4: state_str = "RECENTLY_LOST"; break;
-                case 5: state_str = "LOST"; break;
-                default: state_str = "UNKNOWN"; break;
-            }
-            
-            
-            rclcpp::Time stamp = rclcpp::Time(static_cast<int64_t>(tImLeft * 1e9));// 安全时间戳
-            PublishTransform(Tcw, stamp, tracking_state);
+//             if (doRectify_)
+//             {
+//                 RCLCPP_INFO(this->get_logger(), "Applying stereo rectification");
+//                 cv::remap(imLeft, imLeft, M1l_, M2l_, cv::INTER_LINEAR);
+//                 cv::remap(imRight, imRight, M1r_, M2r_, cv::INTER_LINEAR);
+//             }
 
             
-            std::chrono::milliseconds tSleep(1);
-            std::this_thread::sleep_for(tSleep);
-        }
-    }
-}
+//             // 检查图像数据是否有效
+//             if (imLeft.empty() || imRight.empty()) {
+//                 RCLCPP_ERROR(this->get_logger(), "Empty image data!");
+//                 return;
+//             }
+
+//             // 检查时间戳是否为 nan
+//             if (std::isnan(tImLeft) || std::isnan(tImRight)) {
+//                 RCLCPP_ERROR(this->get_logger(), "Timestamp is NaN! Left: %f, Right: %f", tImLeft, tImRight);
+//                 return;
+//             }
+
+//             // 检查 IMU 数据是否有效
+//             for (const auto &imu : vImuMeas) {
+//                 if (std::isnan(imu.w.x()) || std::isnan(imu.w.y()) || std::isnan(imu.w.z()) ||
+//                     std::isnan(imu.a.x()) || std::isnan(imu.a.y()) || std::isnan(imu.a.z())) {
+//                     RCLCPP_ERROR(this->get_logger(), "IMU data contains NaN!");
+//                     return;
+//                 }
+//             }
+//             Sophus::SE3f Tcw = SLAM_->TrackStereo(imLeft, imRight, tImLeft, vImuMeas);
+
+//             // 检查SLAM跟踪状态
+//             int tracking_state = SLAM_->GetTrackingState();
+//             // RCLCPP_INFO(this->get_logger(), "SLAM Tracking State: %d", tracking_state);
+//             std::string state_str;
+//             switch(tracking_state) {
+//                 case 0: state_str = "SYSTEM_NOT_READY"; break;
+//                 case 1: state_str = "NO_IMAGES_YET"; break;
+//                 case 2: state_str = "NOT_INITIALIZED"; break;
+//                 case 3: state_str = "OK"; break;
+//                 case 4: state_str = "RECENTLY_LOST"; break;
+//                 case 5: state_str = "LOST"; break;
+//                 default: state_str = "UNKNOWN"; break;
+//             }
+            
+            
+//             rclcpp::Time stamp = rclcpp::Time(static_cast<int64_t>(tImLeft * 1e9));// 安全时间戳
+//             PublishTransform(Tcw, stamp, tracking_state);
+
+            
+//             std::chrono::milliseconds tSleep(1);
+//             std::this_thread::sleep_for(tSleep);
+//         }
+//     }
+// }
 
 void StereoInertialNode::PublishTransform(const Sophus::SE3f& Tcw, const rclcpp::Time& stamp, int tracking_state)
 {
@@ -432,3 +432,121 @@ void StereoInertialNode::PublishTransform(const Sophus::SE3f& Tcw, const rclcpp:
     }
 }
 
+// 修改后的IMU数据处理逻辑
+void StereoInertialNode::SyncWithImu()
+{
+    const double maxTimeDiff = 0.08;
+    // RCLCPP_INFO(this->get_logger(), "Sync thread started");
+    int loop_count = 0;
+    while (rclcpp::ok()) 
+    {
+        // loop_count++;
+        // if (loop_count % 100 == 0) { // 每100次循环打印一次状态
+        //     RCLCPP_INFO(this->get_logger(), "Sync loop: %d", loop_count);
+        //     RCLCPP_INFO(this->get_logger(), "Left buf: %zu, Right buf: %zu, IMU buf: %zu", 
+        //             imgLeftBuf_.size(), imgRightBuf_.size(), imuBuf_.size());
+        // }
+        // 批量获取数据（减少锁粒度）
+        std::vector<ImuMsg::SharedPtr> localImuBuffer;
+        ImageMsg::SharedPtr localLeftMsg, localRightMsg;
+        
+        { // 临界区开始
+            std::lock_guard<std::mutex> lockLeft(bufMutexLeft_);
+            std::lock_guard<std::mutex> lockRight(bufMutexRight_);
+            // RCLCPP_INFO(this->get_logger(), "1111");
+            if (!imgLeftBuf_.empty() && !imgRightBuf_.empty()) {
+  
+                        // 修改后的时间戳转换示例
+                double tLeft = Utility::StampToSec(imgLeftBuf_.front()->header.stamp);
+                double tRight = Utility::StampToSec(imgRightBuf_.front()->header.stamp);
+            
+                        // 时间同步优化（使用更高效的队列遍历）
+                while (!imgRightBuf_.empty() && (tLeft - Utility::StampToSec(imgRightBuf_.front()->header.stamp)) > maxTimeDiff) {
+                    imgRightBuf_.pop();
+                }
+                while (!imgLeftBuf_.empty() && (Utility::StampToSec(imgLeftBuf_.front()->header.stamp) - tRight) > maxTimeDiff) {
+                    imgLeftBuf_.pop();
+                }
+                
+                if (!imgLeftBuf_.empty() && !imgRightBuf_.empty()) {
+                    localLeftMsg = imgLeftBuf_.front();
+                    localRightMsg = imgRightBuf_.front();
+                }
+            }
+            // RCLCPP_INFO(this->get_logger(), "2222");
+        } // 临界区结束
+
+        if (localLeftMsg && localRightMsg) 
+        {
+            // 批量获取IMU数据
+            {
+                std::lock_guard<std::mutex> lockImu(bufMutex_);
+                while (!imuBuf_.empty() && 
+                        Utility::StampToSec(imuBuf_.front()->header.stamp) <=  Utility::StampToSec(localLeftMsg->header.stamp)) {
+                    localImuBuffer.push_back(imuBuf_.front());
+                    imuBuf_.pop();
+                }
+            }
+
+            // 图像预处理并行化
+            auto future_left = std::async(std::launch::async, [this, &localLeftMsg](){
+                return PreprocessImage(localLeftMsg);
+            });
+            auto future_right = std::async(std::launch::async, [this, &localRightMsg](){
+                return PreprocessImage(localRightMsg);
+            });
+
+            cv::Mat imLeft = future_left.get();
+            cv::Mat imRight = future_right.get();
+            std::vector<ORB_SLAM3::IMU::Point> imu_measurements = ConvertImuMessages(localImuBuffer);
+            if (imu_measurements.size() < 10) {  // 至少需要10个IMU样本
+                // RCLCPP_WARN(this->get_logger(), "Insufficient IMU data: %zu samples. Skipping frame.", 
+                //             imu_measurements.size());
+                continue;
+            }
+            // 执行SLAM跟踪
+            if (!imLeft.empty() && !imRight.empty()) {
+
+                Sophus::SE3f Tcw = SLAM_->TrackStereo(imLeft, imRight, 
+
+                Utility::StampToSec(localLeftMsg->header.stamp), imu_measurements);
+
+                PublishTransform(Tcw, localLeftMsg->header.stamp);
+            }       
+         
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+// 新增图像预处理函数
+cv::Mat StereoInertialNode::PreprocessImage(const ImageMsg::SharedPtr msg) 
+{
+    cv::Mat img = GetImage(msg);
+    if (doRectify_) {
+        cv::remap(img, img, M1l_, M2l_, cv::INTER_LINEAR); // 建议预计算校正参数
+    }
+    if (bClahe_) {
+        clahe_->apply(img, img);
+    }
+    return img;
+}
+
+std::vector<ORB_SLAM3::IMU::Point> StereoInertialNode::ConvertImuMessages(
+    const std::vector<ImuMsg::SharedPtr>& imu_msgs)
+{
+    std::vector<ORB_SLAM3::IMU::Point> imu_points;
+    imu_points.reserve(imu_msgs.size());
+    
+    for (const auto& msg : imu_msgs) {
+        double t = Utility::StampToSec(msg->header.stamp);
+        cv::Point3f acc(msg->linear_acceleration.x,
+                       msg->linear_acceleration.y,
+                       msg->linear_acceleration.z);
+        cv::Point3f gyr(msg->angular_velocity.x,
+                       msg->angular_velocity.y,
+                       msg->angular_velocity.z);
+        imu_points.emplace_back(acc, gyr, t);
+    }
+    return imu_points;
+}

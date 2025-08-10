@@ -78,6 +78,9 @@ private:
     bool has_valid_pose_;
 
     void PublishTransform(const Sophus::SE3f& Tcw, const rclcpp::Time& stamp, int tracking_state = -1);
+    cv::Mat PreprocessImage(const ImageMsg::SharedPtr msg);
+    std::vector<ORB_SLAM3::IMU::Point> ConvertImuMessages(
+        const std::vector<ImuMsg::SharedPtr>& imu_msgs);
 };
 
 #endif
