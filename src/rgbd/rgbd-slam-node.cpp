@@ -21,10 +21,16 @@ nav_msgs::msg::Odometry latest_odom_msg_;
 std::mutex odom_mutex_;
 // 定义 IMU 队列
 std::deque<ORB_SLAM3::IMU::Point> imu_queue_;
+
+auto qos = rclcpp::QoS(rclcpp::KeepLast(200))
+             .reliable()
+             .durability_volatile();
+
 RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
 : Node("ORB_SLAM3_ROS2"),
   m_SLAM(pSLAM)
 {
+
     // 声明参数
     this->declare_parameter<std::string>("map_frame_id", "map");
     this->declare_parameter<std::string>("base_frame_id", "tita4264886/base_link");
@@ -48,9 +54,14 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
         approximate_sync_policy(10), *rgb_sub, *depth_sub);
     syncApproximate->registerCallback(&RgbdSlamNode::GrabRGBD, this);
 
+    // imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+    //     "/camera/gyro_accel/sample",
+    //     rclcpp::SensorDataQoS(),
+    //     std::bind(&RgbdSlamNode::GrabIMU, this, std::placeholders::_1));
+        
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
         "/tita4264886/imu_sensor_broadcaster/imu",
-        rclcpp::SensorDataQoS(),
+        qos,
         std::bind(&RgbdSlamNode::GrabIMU, this, std::placeholders::_1));
 
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -454,6 +465,7 @@ bool RgbdSlamNode::isPoseValid(const Sophus::SE3f& pose)
     Eigen::Matrix3f R = pose.rotationMatrix();
     if (std::abs(R.determinant() - 1.0f) > 0.1f) {
         return false;
+
     }
     
     return true;
@@ -516,3 +528,4 @@ Sophus::SE3f RgbdSlamNode::predictPose(double current_time)
     
     return Sophus::SE3f(predicted_matrix);
 }
+

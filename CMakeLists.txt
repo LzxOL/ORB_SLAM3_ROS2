@@ -71,7 +71,7 @@ target_link_libraries(mono ${OpenCV_LIBRARIES})
 # RGB-D Node
 add_executable(rgbd
   src/rgbd/rgbd.cpp
-  src/rgbd/rgbd-slam-node.cpp
+  src/rgbd/rgbd-slam-node_8_9_print.cpp
 )
 ament_target_dependencies(rgbd rclcpp sensor_msgs tf2_ros cv_bridge message_filters ORB_SLAM3 Pangolin nav_msgs)
 target_link_libraries(rgbd ${OpenCV_LIBRARIES})

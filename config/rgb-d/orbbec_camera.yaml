@@ -52,12 +52,14 @@ DepthMapFactor: 1000.0
 #--------------------------------------------------------------------------------------------
 # ORB Feature Extraction Parameters
 #--------------------------------------------------------------------------------------------
-ORBextractor.nFeatures: 1200
-ORBextractor.scaleFactor: 1.2
+ORBextractor.nFeatures: 2500   #1200
+ORBextractor.scaleFactor: 2.4   #1.2
 ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 20
-ORBextractor.minThFAST: 7
+# ORBextractor.iniThFAST: 20
+# ORBextractor.minThFAST: 7
 
+ORBextractor.iniThFAST: 5
+ORBextractor.minThFAST: 1
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters
 #--------------------------------------------------------------------------------------------
@@ -89,8 +91,13 @@ Tbc: !!opencv-matrix
 InsertKFsWhenLost: 0
 
 # IMU noise (Use those from VINS-mono)
-IMU.NoiseGyro: 1e-3 # 2.44e-4 #1e-3 # rad/s^0.5
-IMU.NoiseAcc: 1e-2 # 1.47e-3 #1e-2 # m/s^1.5
-IMU.GyroWalk: 1e-6 # rad/s^1.5
-IMU.AccWalk: 1e-4 # m/s^2.5
+# IMU.NoiseGyro: 1e-3 # 2.44e-4 #1e-3 # rad/s^0.5
+# IMU.NoiseAcc: 1e-2 # 1.47e-3 #1e-2 # m/s^1.5
+# IMU.GyroWalk: 1e-6 # rad/s^1.5
+# IMU.AccWalk: 1e-4 # m/s^2.5
+# IMU.Frequency: 200
+IMU.NoiseGyro: 1e-3 # rad/s^0.5
+IMU.NoiseAcc: 1e-2   # m/s^1.5
+IMU.GyroWalk: 1e-7 # rad/s^1.5
+IMU.AccWalk: 1e-7 # m/s^2.5
 IMU.Frequency: 200

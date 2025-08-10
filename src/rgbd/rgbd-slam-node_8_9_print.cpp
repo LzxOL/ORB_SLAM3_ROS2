@@ -21,6 +21,11 @@ nav_msgs::msg::Odometry latest_odom_msg_;
 std::mutex odom_mutex_;
 // 定义 IMU 队列
 std::deque<ORB_SLAM3::IMU::Point> imu_queue_;
+
+auto qos = rclcpp::QoS(rclcpp::KeepLast(200))
+             .reliable()
+             .durability_volatile();
+
 RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
 : Node("ORB_SLAM3_ROS2"),
   m_SLAM(pSLAM)
@@ -50,7 +55,7 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
 
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
         "/tita4264886/imu_sensor_broadcaster/imu",
-        rclcpp::SensorDataQoS(),
+        qos,
         std::bind(&RgbdSlamNode::GrabIMU, this, std::placeholders::_1));
 
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
