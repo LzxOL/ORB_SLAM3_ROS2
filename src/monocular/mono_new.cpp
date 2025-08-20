@@ -6,6 +6,10 @@
 #include "rclcpp/rclcpp.hpp"
 #include "monocular-slam-node.hpp"
 
+#include "libobsensor/hpp/Pipeline.hpp"
+#include "libobsensor/hpp/Error.hpp"
+#include "libobsensor/hpp/Context.hpp"
+
 #include "System.h"
 
 
@@ -32,3 +36,5 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
+//只添加了头文件

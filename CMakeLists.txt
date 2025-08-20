@@ -9,6 +9,10 @@ project(orbslam3)
 # 请确保下面的路径是你自己系统中原生ORB_SLAM3的真实根目录。
 #
 set(ORB_SLAM3_DIR "/home/robot/orbslam3/ORB_SLAM3")
+set(ORB_SLAM3_ROOT_DIR "/home/robot/orbslam3/ORB_SLAM3")
+set(OrbbecSDK_DIR "/home/robot/OrbbecSDK")
+
+
 #
 # ================= [手动添加的路径配置 - 结束] ============================
 # ====================================================================
@@ -36,6 +40,10 @@ find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(OrbbecSDK REQUIRED)
 # Find external non-ROS dependencies
 find_package(Sophus REQUIRED)
 find_package(Pangolin REQUIRED)
@@ -44,6 +52,7 @@ find_package(ORB_SLAM3 REQUIRED)
 # Explicitly find OpenCV and its required components to solve linking issues
 find_package(OpenCV REQUIRED COMPONENTS core imgproc calib3d features2d)
 find_package(nav_msgs REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
 
 # Include directories
 include_directories(
@@ -61,28 +70,28 @@ link_directories(
 # --- Define Executables and Dependencies ---
 
 # Monocular Node
-add_executable(mono
-  src/monocular/mono.cpp
-  src/monocular/monocular-slam-node.cpp
-)
-ament_target_dependencies(mono rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin)
-target_link_libraries(mono ${OpenCV_LIBRARIES})
+#add_executable(mono
+#  src/monocular/mono_new.cpp
+#  src/monocular/monocular-slam-node-new.cpp
+#)
+#ament_target_dependencies(mono rclcpp sensor_msgs cv_bridge tf2_ros geometry_msgs ORB_SLAM3 Pangolin)
+#target_link_libraries(mono ${OpenCV_LIBRARIES} OrbbecSDK::OrbbecSDK)
 
 # RGB-D Node
 add_executable(rgbd
-  src/rgbd/rgbd.cpp
-  src/rgbd/rgbd-slam-node_8_9_print.cpp
+  src/rgbd/rgbd_new.cpp
+  src/rgbd/rgbd-slam-node-new.cpp
 )
-ament_target_dependencies(rgbd rclcpp sensor_msgs tf2_ros cv_bridge message_filters ORB_SLAM3 Pangolin nav_msgs)
-target_link_libraries(rgbd ${OpenCV_LIBRARIES})
+ament_target_dependencies(rgbd rclcpp sensor_msgs tf2 tf2_ros cv_bridge message_filters ORB_SLAM3 Pangolin nav_msgs tf2_sensor_msgs tf2_geometry_msgs)
+target_link_libraries(rgbd ${OpenCV_LIBRARIES} OrbbecSDK::OrbbecSDK)
 
 # # Stereo Node
-# add_executable(stereo
+#add_executable(stereo
 #   src/stereo/stereo.cpp
 #   src/stereo/stereo-slam-node.cpp
 # )
 # ament_target_dependencies(stereo rclcpp sensor_msgs cv_bridge message_filters ORB_SLAM3 Pangolin tf2_ros nav_msgs)
-# target_link_libraries(ster`eo tf2_ros::tf2_ros ${OpenCV_LIBRARIES})
+# target_link_libraries(stereo tf2_ros::tf2_ros ${OpenCV_LIBRARIES})
 
 # Stereo-Inertial Node
 add_executable(stereo-inertial
@@ -94,7 +103,7 @@ target_link_libraries(stereo-inertial ${OpenCV_LIBRARIES})
 
 # --- Installation ---
 
-install(TARGETS mono rgbd 
+install(TARGETS  rgbd #mono 
 # stereo 
 stereo-inertial
   DESTINATION lib/${PROJECT_NAME})
