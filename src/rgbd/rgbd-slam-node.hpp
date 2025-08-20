@@ -48,6 +48,8 @@
 #include "libobsensor/hpp/Sensor.hpp" 
 #include "libobsensor/ObSensor.hpp"
 
+#include <Eigen/Geometry> // 添加Eigen几何头文件
+
 class RgbdSlamNode : public rclcpp::Node
 {
 public:
@@ -154,7 +156,7 @@ private:
     sensor_msgs::msg::PointCloud2 convertToRosPointCloud(std::shared_ptr<ob::Frame> frame);
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
     rclcpp::Time last_pointcloud_time_;
-    double pointcloud_publish_interval_ = 0.5; // 10Hz
+    double pointcloud_publish_interval_ = 0.05; // 10Hz
     double depth_scale = 0.001; // 默认值，需替换为实际值
 
     sensor_msgs::msg::PointCloud2 convertToIntensityPointCloudInMapFrame(
@@ -175,6 +177,15 @@ private:
     std::string my_map_frame_id_;  // 新的机器人坐标系
     Sophus::SE3f T_map_my_map_;    // 从 map(OpenCV) 到 my_map(机器人) 的变换
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;  // Odometry坐标系，机器人的位姿 
+
+    std::shared_ptr<rclcpp::TimerBase> pointcloud_timer_;
+    std::shared_ptr<ob::Frame> latest_pointcloud_frame_;
+    
+    // 添加预计算的静态变换矩阵
+    Eigen::Isometry3f T_camera_to_base_; // 相机坐标系到base_link坐标系的变换
+    int downsample_ratio_ = 1; // 点云下采样比例
+    bool use_openmp_ = true;
+
 };
 
 #endif // __RGBD_SLAM_NODE_HPP__

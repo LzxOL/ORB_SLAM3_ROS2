@@ -27,12 +27,16 @@
 #include "libobsensor/hpp/StreamProfile.hpp"
 #include "libobsensor/hpp/Sensor.hpp"
 #include "libobsensor/ObSensor.hpp"
+
+#include <Eigen/Geometry>
+
 using namespace std::chrono_literals;
 
 #define camera_width 1280
 #define camera_height 720
 #define camera_fps 30
-// 在 RgbdSlamNode 类中添加成员变量
+
+// 全局变量定义
 std::atomic<bool> time_initialized_{false};
 std::mutex time_mutex_;
 double last_processed_timestamp_ = 0;
@@ -43,11 +47,11 @@ std::atomic<bool> depth_time_initialized_{false};
 uint64_t imu_start_time_ns_ = 0;
 uint64_t color_start_time_ns_ = 0;
 uint64_t depth_start_time_ns_ = 0;
-bool use_imu = false; // 是否使用IMU数据
+bool use_imu = false;
+bool use_RGBD = true;
+bool use_MONO = false;
+bool use_RGBDimu = false;
 
-bool use_RGBD = true; // 是否使用RGBD模式
-bool use_MONO = false; // 是否使用单目模式
-bool use_RGBDimu = false; // 是否使用RGBD+IMU模式
 RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
 : Node("ORB_SLAM3_ROS2"),
   m_SLAM(pSLAM),
@@ -59,67 +63,105 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
     this->declare_parameter<bool>("use_pose_prediction", true);
     this->declare_parameter<double>("max_prediction_time", 1.0);
     this->declare_parameter<std::string>("pointcloud_frame_id", "camera_link");
-    this->declare_parameter<double>("pointcloud_interval", 0.5);
+    this->declare_parameter<double>("pointcloud_interval", 0.05);  // 改为0.05秒(20Hz)
 
     this->declare_parameter<bool>("publish_pointcloud", true);
     this->declare_parameter<bool>("debug_pointcloud", true);
     this->declare_parameter<std::string>("pointcloud_output_frame", "tita4264886/base_link");
     
     this->declare_parameter<std::string>("my_map_frame_id", "my_map");
+    this->declare_parameter<bool>("use_openmp", false);  // 禁用OpenMP参数
+    this->declare_parameter<int>("pointcloud_downsample_ratio", 4);  // 下采样比例
+    
     // 获取参数
     this->get_parameter("my_map_frame_id", my_map_frame_id_);
-
     this->get_parameter("publish_pointcloud", publish_pointcloud_);
     this->get_parameter("debug_pointcloud", debug_pointcloud_);
     this->get_parameter("pointcloud_output_frame", pointcloud_output_frame_);
-
     this->get_parameter("pointcloud_interval", pointcloud_publish_interval_);
     this->get_parameter("map_frame_id", map_frame_id_);
     this->get_parameter("base_frame_id", base_frame_id_);
     this->get_parameter("use_pose_prediction", use_pose_prediction_);
     this->get_parameter("pointcloud_frame_id", pointcloud_frame_id_);
+    this->get_parameter("use_openmp", use_openmp_);
+    this->get_parameter("pointcloud_downsample_ratio", downsample_ratio_);
 
     double max_prediction_time;
     this->get_parameter("max_prediction_time", max_prediction_time);
     max_prediction_time_ = max_prediction_time;
-    // 初始化彩色点云发布器
+    
+    // 初始化发布器
     pointcloud_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/camera/depth_registered/points", 
         rclcpp::SensorDataQoS().keep_last(10).reliable()
     );
-    // 初始化强度点云发布器
+    
     intensity_pointcloud_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/registered_scan", 
         rclcpp::SensorDataQoS().keep_last(10).reliable()
     );
-    // 初始化 Odometry 发布器
+    
     odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>(
         "/state_estimation", 
         10
     );
-    // 初始化 TF 广播器
+    
+    // 初始化TF相关
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
-    // 初始化静态TF广播器
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
-    // 初始化 TF 缓冲区和监听器
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     
-    // 静态 TF 发布
+    // 发布静态TF
     geometry_msgs::msg::TransformStamped static_tf;
     static_tf.header.stamp = this->now();
     static_tf.header.frame_id = "tita4264886/base_link";
     static_tf.child_frame_id = "camera_link";
-    static_tf.transform.translation.x = 0.1;    //相机到机器人中心的x偏移
+    static_tf.transform.translation.x = 0.1;
     static_tf.transform.translation.y = 0.0;
-    static_tf.transform.translation.z = 0.2;    //相机到机器人中心的z偏移
+    static_tf.transform.translation.z = 0.2;
     static_tf.transform.rotation.x = 0.0;
     static_tf.transform.rotation.y = 0.0;
     static_tf.transform.rotation.z = 0.0;
     static_tf.transform.rotation.w = 1.0;
     static_tf_broadcaster_->sendTransform(static_tf);
 
-    // 定义从 map(OpenCV) 到 my_map(机器人) 的静态变换,将 OpenCV 坐标系 (X右, Y下, Z前) 转换为 ROS 标准坐标系 (X前, Y左, Z上)
+    // 预计算相机到base_link的静态变换
+    try {
+        auto transform = tf_buffer_->lookupTransform(
+            pointcloud_output_frame_, 
+            pointcloud_frame_id_,
+            tf2::TimePointZero,
+            tf2::durationFromSec(5.0)
+        );
+        
+        Eigen::Translation3f translation(
+            transform.transform.translation.x,
+            transform.transform.translation.y,
+            transform.transform.translation.z
+        );
+        
+        Eigen::Quaternionf rotation(
+            transform.transform.rotation.w,
+            transform.transform.rotation.x,
+            transform.transform.rotation.y,
+            transform.transform.rotation.z
+        );
+        
+        T_camera_to_base_ = translation * rotation;
+        
+        RCLCPP_INFO(this->get_logger(), 
+                   "Precomputed static transform from %s to %s",
+                   pointcloud_frame_id_.c_str(), 
+                   pointcloud_output_frame_.c_str());
+    } catch (tf2::TransformException &ex) {
+        RCLCPP_WARN(this->get_logger(), 
+                   "Failed to get static transform: %s. Using identity transform.", 
+                   ex.what());
+        T_camera_to_base_ = Eigen::Isometry3f::Identity();
+    }
+
+    // 定义从 map(OpenCV) 到 my_map(机器人) 的静态变换
     Eigen::Matrix3f R_map_my_map;
     R_map_my_map << 0, 0, 1,
                    -1, 0, 0,
@@ -146,6 +188,7 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
     
     RCLCPP_INFO(this->get_logger(), "Published static transform from %s to %s",
                 map_frame_id_.c_str(), my_map_frame_id_.c_str());
+    
     // 初始化位姿连续性相关变量
     has_valid_pose_ = false;
     last_valid_pose_time_ = 0.0;
@@ -171,48 +214,52 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
         if(device->isPropertySupported(OB_PROP_DEPTH_SOFT_FILTER_BOOL, OB_PERMISSION_WRITE)) {
             device->setBoolProperty(OB_PROP_DEPTH_SOFT_FILTER_BOOL, true);
         }
+        
         device->switchDepthWorkMode("Default");
-        if(device->isPropertySupported(OB_PROP_DEPTH_AUTO_EXPOSURE_BOOL, OB_PERMISSION_READ)) {
-            bool isOpen = device->getBoolProperty(OB_PROP_DEPTH_AUTO_EXPOSURE_BOOL);
-            if(device->isPropertySupported(OB_PROP_DEPTH_AUTO_EXPOSURE_BOOL, OB_PERMISSION_WRITE)) {
-                device->setBoolProperty(OB_PROP_DEPTH_AUTO_EXPOSURE_BOOL, !isOpen);
-            }
+        
+        // 配置自动曝光和白平衡
+        if(device->isPropertySupported(OB_PROP_DEPTH_AUTO_EXPOSURE_BOOL, OB_PERMISSION_WRITE)) {
+            device->setBoolProperty(OB_PROP_DEPTH_AUTO_EXPOSURE_BOOL, true);
         }
-        if(device->isPropertySupported(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, OB_PERMISSION_READ)) {
-            if(device->isPropertySupported(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, OB_PERMISSION_WRITE)) {
-                device->setBoolProperty(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, true);
-            }
+        
+        if(device->isPropertySupported(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, OB_PERMISSION_WRITE)) {
+            device->setBoolProperty(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, true);
         }
-        if(device->isPropertySupported(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, OB_PERMISSION_READ)) {
-            bool isOpen = device->getBoolProperty(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL);
-            if(device->isPropertySupported(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, OB_PERMISSION_WRITE)) {
-                device->setBoolProperty(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, !isOpen);
-            }
+        
+        if(device->isPropertySupported(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, OB_PERMISSION_WRITE)) {
+            device->setBoolProperty(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, true);
         }
-        /// 初始化Pipeline
+        
+        // 初始化Pipeline
         pipeline = std::make_shared<ob::Pipeline>(device);
-        // 配置彩色流和深度流
+        
+        // 配置彩色流和深度流 - 保持1280x720分辨率
+        auto config = std::make_shared<ob::Config>();
+        
         auto color_profiles = pipeline->getStreamProfileList(OB_SENSOR_COLOR);
         auto depth_profiles = pipeline->getStreamProfileList(OB_SENSOR_DEPTH);
-        // 创建配置对象
-        auto config = std::make_shared<ob::Config>();
-        // 配置彩色流
-        if (color_profiles) {
-            auto color_profile = color_profiles->getVideoStreamProfile(camera_width, camera_height, OB_FORMAT_RGB, camera_fps);
-            config->enableStream(color_profile);
+        
+        // 使用1280x720分辨率
+        auto color_profile = color_profiles->getVideoStreamProfile(camera_width, camera_height, OB_FORMAT_RGB, camera_fps);
+        auto depth_profile = depth_profiles->getVideoStreamProfile(camera_width, camera_height, OB_FORMAT_Y16, camera_fps);
+        
+        if (!color_profile || !depth_profile) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to find compatible stream profiles");
+            throw std::runtime_error("No compatible stream profiles");
         }
-        // 配置深度流
-        if (depth_profiles) {
-            auto depth_profile = depth_profiles->getVideoStreamProfile(camera_width, camera_height, OB_FORMAT_Y16, camera_fps);
-            config->enableStream(depth_profile);
-        }
-        config->setAlignMode(ALIGN_D2C_SW_MODE);// 开启软件D2C对齐, 生成RGBD点云时需要开启
+        
+        config->enableStream(color_profile);
+        config->enableStream(depth_profile);
+        config->setAlignMode(ALIGN_D2C_SW_MODE);
+        
         pipeline->start(config);
         auto camera_param = pipeline->getCameraParam();
         pointCloud.setCameraParam(camera_param);
         
-        RCLCPP_INFO(this->get_logger(), "Orbbec camera initialized successfully");
+        RCLCPP_INFO(this->get_logger(), "Orbbec camera initialized successfully with resolution %dx%d", 
+                   camera_width, camera_height);
         last_pointcloud_time_ = this->now();
+        
         // 启动SLAM处理线程
         running_ = true;
         slam_thread_ = std::thread(&RgbdSlamNode::ProcessFrame, this);
@@ -242,8 +289,9 @@ RgbdSlamNode::~RgbdSlamNode()
 void RgbdSlamNode::ProcessFrame()
 {
     while (running_) {
-        auto frameset = pipeline->waitForFrames(100);
+        auto frameset = pipeline->waitForFrames(50);  // 减少等待时间
         if (!frameset) continue;
+        
         // 提取对齐后的帧
         auto color_frame = frameset->colorFrame();
         auto depth_frame = frameset->depthFrame();
@@ -251,21 +299,22 @@ void RgbdSlamNode::ProcessFrame()
             RCLCPP_WARN(this->get_logger(), "Failed to get color or depth frame");
             continue;
         }
+        
         // 转换为OpenCV格式
         cv::Mat color(cv::Size(camera_width, camera_height), CV_8UC3, 
               (void*)color_frame->data(), cv::Mat::AUTO_STEP);
         cv::Mat depth(cv::Size(camera_width, camera_height), CV_16UC1, 
                   (void*)depth_frame->data(), cv::Mat::AUTO_STEP);
+        
         if (color.empty() || depth.empty()) {
             RCLCPP_WARN(this->get_logger(), "Empty image or depth frame!");
             continue;
         }
 
+        // 处理点云（异步）
         auto now = this->now();
         if (publish_pointcloud_ && (now - last_pointcloud_time_).seconds() >= pointcloud_publish_interval_) {
-            // 检查是否已有处理线程在运行
             if (!pointcloud_processing_.load()) {
-                // 标记处理开始
                 pointcloud_processing_.store(true);
                 
                 // 创建帧的副本（确保线程安全）
@@ -273,188 +322,112 @@ void RgbdSlamNode::ProcessFrame()
                 
                 // 启动异步处理线程
                 std::thread([this, frame_copy]() {
-                    // 转换并发布点云
-                    auto cloud_msg = convertToIntensityPointCloudInMapFrame(
-                        frame_copy, 
-                        pointcloud_frame_id_, 
-                        pointcloud_output_frame_,
-                        debug_pointcloud_
-                    );
-                    
-                    if (!cloud_msg.data.empty()) {
-                        intensity_pointcloud_publisher_->publish(cloud_msg);
+                    try {
+                        auto cloud_msg = convertToIntensityPointCloudInMapFrame(
+                            frame_copy, 
+                            pointcloud_frame_id_, 
+                            pointcloud_output_frame_,
+                            debug_pointcloud_
+                        );
                         
-                        if (debug_pointcloud_) {
-                            size_t point_count = cloud_msg.width * cloud_msg.height;
-                            RCLCPP_INFO(this->get_logger(), 
-                                "Published intensity point cloud: %zu points to frame %s", 
-                                point_count, cloud_msg.header.frame_id.c_str());
+                        if (!cloud_msg.data.empty()) {
+                            intensity_pointcloud_publisher_->publish(cloud_msg);
+                            
+                            if (debug_pointcloud_) {
+                                size_t point_count = cloud_msg.width * cloud_msg.height;
+                                RCLCPP_INFO(this->get_logger(), 
+                                    "Published intensity point cloud: %zu points to frame %s", 
+                                    point_count, cloud_msg.header.frame_id.c_str());
+                            }
                         }
+                    } catch (const std::exception& e) {
+                        RCLCPP_ERROR(this->get_logger(), "Point cloud processing error: %s", e.what());
                     }
                     
-                    // 标记处理完成
                     pointcloud_processing_.store(false);
-                }).detach();  // 分离线程，自动销毁
-                    
-                    last_pointcloud_time_ = now;
-                } else {
-                    RCLCPP_WARN(this->get_logger(), "Skipping point cloud processing: previous task still running");
-                }
+                }).detach();
+                
+                last_pointcloud_time_ = now;
+            }
         }
 
-    
-        double timestamp = this->now().seconds()+this->now().nanoseconds() * 1e-9; // 获取当前时间戳
+        // SLAM处理
+        double timestamp = this->now().seconds() + this->now().nanoseconds() * 1e-9;
         Sophus::SE3f Tcw;
+        
         if(use_RGBD) {
             cv::Mat gray;
             cv::cvtColor(color, gray, cv::COLOR_RGB2GRAY);
-            // cv::cvtColor(color, gray, cv::COLOR_BGR2GRAY);
             Tcw = m_SLAM->TrackRGBD(gray, depth, timestamp);
-        }
-        else if(use_MONO){
+        } else if(use_MONO) {
             Tcw = m_SLAM->TrackMonocular(color, timestamp);
         }
+        
         // 发布TF变换
         if (Tcw.matrix().allFinite() && !Tcw.matrix().isApprox(Eigen::Matrix4f::Identity())) {
-            // 1. 原始位姿：map → camera_link（SLAM输出的相机位姿）
-            Sophus::SE3f Twc_map = Tcw.inverse();  // Tcw是camera→map，逆后是map→camera
-            
-            // 2. 将相机位姿转换到my_map坐标系（原有逻辑保留）
+            Sophus::SE3f Twc_map = Tcw.inverse();
             Sophus::SE3f Twc_my_map = T_map_my_map_ * Twc_map * T_map_my_map_.inverse();
             
-            // 3. 定义：base_link → camera_link 的固定变换 T_bc（从静态TF获取）
-            // 平移：camera在base_link的x+0.1m、z+0.2m处；旋转：无旋转（单位四元数）
-            Eigen::Vector3f t_bc(0.1, 0.0, 0.2);  // base_link到camera_link的平移
-            Eigen::Quaternionf q_bc(1.0, 0.0, 0.0, 0.0);  // 无旋转
+            // 计算base_link位姿
+            Eigen::Vector3f t_bc(0.1, 0.0, 0.2);
+            Eigen::Quaternionf q_bc(1.0, 0.0, 0.0, 0.0);
             Sophus::SE3f T_bc(q_bc, t_bc);
-            
-            // 4. 计算：camera_link → base_link 的逆变换 T_cb（T_bc的逆）
-            // 因T_bc无旋转，逆变换的旋转仍为单位四元数，平移取反
             Sophus::SE3f T_cb = T_bc.inverse();
-            
-            // 5. 关键：计算 map → base_link 的位姿 Twb_my_map
-            // 公式：Twb = Twc（map→camera） × T_cb（camera→base）
             Sophus::SE3f Twb_my_map = Twc_my_map * T_cb;
             
-            // 6. 提取base_link的位姿（平移t和旋转q）
-            Eigen::Matrix3f R = Twb_my_map.rotationMatrix();  // base_link的旋转矩阵
-            Eigen::Vector3f t = Twb_my_map.translation();    // base_link的平移（x,y,z）
-            Eigen::Quaternionf q(R);                         // 转换为四元数
+            Eigen::Matrix3f R = Twb_my_map.rotationMatrix();
+            Eigen::Vector3f t = Twb_my_map.translation();
+            Eigen::Quaternionf q(R);
             
-            // 7. 发布 my_map → base_link 的TF变换（修正为base_link的位姿）
+            // 发布TF
             geometry_msgs::msg::TransformStamped tf_msg;
             tf_msg.header.stamp = this->now();
-            tf_msg.header.frame_id = my_map_frame_id_;          // 父坐标系：my_map
-            tf_msg.child_frame_id = base_frame_id_;          // 子坐标系：base_link
-            tf_msg.transform.translation.x = t.x();          // base_link的x（修正后）
-            tf_msg.transform.translation.y = t.y();          // base_link的y（修正后）
-            tf_msg.transform.translation.z = t.z();          // base_link的z（修正后）
-            tf_msg.transform.rotation.x = q.x();             // base_link的旋转x
-            tf_msg.transform.rotation.y = q.y();             // base_link的旋转y
-            tf_msg.transform.rotation.z = q.z();             // base_link的旋转z
-            tf_msg.transform.rotation.w = q.w();             // base_link的旋转w
+            tf_msg.header.frame_id = my_map_frame_id_;
+            tf_msg.child_frame_id = base_frame_id_;
+            tf_msg.transform.translation.x = t.x();
+            tf_msg.transform.translation.y = t.y();
+            tf_msg.transform.translation.z = t.z();
+            tf_msg.transform.rotation.x = q.x();
+            tf_msg.transform.rotation.y = q.y();
+            tf_msg.transform.rotation.z = q.z();
+            tf_msg.transform.rotation.w = q.w();
             
             tf_broadcaster_->sendTransform(tf_msg);
             
-            // 打印base_link的位姿（便于调试）
-            RCLCPP_INFO(this->get_logger(), "base_link Position in my_map frame: [%.2f, %.2f, %.2f]", 
-                    t.x(), t.y(), t.z());
-
-            // 8. 发布 base_link 的Odometry消息（同样使用修正后的位姿）
+            // 发布Odometry
             auto odom_msg = std::make_unique<nav_msgs::msg::Odometry>();
             odom_msg->header.stamp = this->now();
-            odom_msg->header.frame_id = my_map_frame_id_;       // 父坐标系：my_map
-            odom_msg->child_frame_id = base_frame_id_;       // 子坐标系：base_link
+            odom_msg->header.frame_id = my_map_frame_id_;
+            odom_msg->child_frame_id = base_frame_id_;
             
-            // 填充base_link的位置（修正后）
             odom_msg->pose.pose.position.x = t.x();
             odom_msg->pose.pose.position.y = t.y();
             odom_msg->pose.pose.position.z = t.z();
-            // 填充base_link的姿态（修正后）
             odom_msg->pose.pose.orientation.x = q.x();
             odom_msg->pose.pose.orientation.y = q.y();
             odom_msg->pose.pose.orientation.z = q.z();
             odom_msg->pose.pose.orientation.w = q.w();
             
-            // 发布修正后的Odometry
             odom_publisher_->publish(std::move(odom_msg));
+            // 打印base_link的位姿（便于调试）
+            RCLCPP_INFO(this->get_logger(), "base_link Position in my_map frame: [%.2f, %.2f, %.2f]", 
+                    t.x(), t.y(), t.z());
         }
     }
 }
 
-
-sensor_msgs::msg::PointCloud2 RgbdSlamNode::convertToRosPointCloud(std::shared_ptr<ob::Frame> frame) {
-    if (!frame->is<ob::PointsFrame>()) {
-        RCLCPP_ERROR(this->get_logger(), "Frame is not a PointsFrame!");
-        return sensor_msgs::msg::PointCloud2(); // 返回空点云
-    }
-    auto points_frame = frame->as<ob::PointsFrame>();
- 
-    sensor_msgs::msg::PointCloud2 cloud;
-    
-    // 使用传感器时间戳
-    uint64_t sensor_time_us = points_frame->systemTimeStampUs();
-    cloud.header.stamp = rclcpp::Time(sensor_time_us);
-    cloud.header.frame_id = pointcloud_frame_id_; // 使用参数化的frame_id
- 
-    // 定义字段
-    sensor_msgs::PointCloud2Modifier modifier(cloud);
-    modifier.setPointCloud2Fields(4,
-        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "rgb", 1, sensor_msgs::msg::PointField::UINT32
-    );
- 
-    auto* points = static_cast<OBColorPoint*>(points_frame->data());
-    size_t total_points = points_frame->dataSize() / sizeof(OBColorPoint);
-    size_t valid_count = 0;
-    const float min_distance = 20.0f; // 20mm 有效距离阈值
-    
-    // 第一遍：统计有效点
-    for (size_t i = 0; i < total_points; ++i) {
-        if (points[i].z > min_distance) { // 只保留大于20mm的点
-            valid_count++;
-        }
-    }
- 
-    // 设置云属性
-    modifier.resize(valid_count);
-    cloud.width = valid_count;
-    cloud.height = 1;
-    cloud.is_dense = false;
- 
-    // 第二遍：填充有效点（毫米转米）
-    sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
-    sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
-    sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
-    sensor_msgs::PointCloud2Iterator<uint32_t> iter_rgb(cloud, "rgb");
- 
-    for (size_t i = 0; i < total_points; ++i) {
-        if (points[i].z > min_distance) {
-            // 毫米转换为米
-            *iter_x = points[i].x * 0.001f;
-            *iter_y = points[i].y * 0.001f;
-            *iter_z = points[i].z * 0.001f;
-            *iter_rgb = (static_cast<uint32_t>(points[i].r) << 16) |
-                        (static_cast<uint32_t>(points[i].g) << 8) |
-                        static_cast<uint32_t>(points[i].b);
-            ++iter_x; ++iter_y; ++iter_z; ++iter_rgb;
-        }
-    }
- 
-    RCLCPP_INFO(this->get_logger(), "Published point cloud with %zu/%zu valid points", 
-                valid_count, total_points);
-    return cloud;
-}
-
-//将点云转换为强度点云并变换坐标系
 sensor_msgs::msg::PointCloud2 RgbdSlamNode::convertToIntensityPointCloudInMapFrame(
     std::shared_ptr<ob::Frame> frame, 
     const std::string& input_frame,
     const std::string& output_frame,
     bool debug)
 {
+    (void)input_frame; // 避免未使用参数警告
+    (void)debug;       // 避免未使用参数警告
+
+    // 开始计时
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
     sensor_msgs::msg::PointCloud2 output;
     
     if (!frame->is<ob::PointsFrame>()) {
@@ -466,122 +439,130 @@ sensor_msgs::msg::PointCloud2 RgbdSlamNode::convertToIntensityPointCloudInMapFra
     auto* points = static_cast<OBColorPoint*>(points_frame->data());
     size_t total_points = points_frame->dataSize() / sizeof(OBColorPoint);
     
-    // 创建中间点云（带RGB）
-    sensor_msgs::msg::PointCloud2 rgb_cloud;
-    rgb_cloud.header.stamp = this->now();
-    rgb_cloud.header.frame_id = input_frame;
-    rgb_cloud.height = 1;
-    rgb_cloud.width = total_points;
-    rgb_cloud.is_dense = false;
+    // 原始图像尺寸
+    const int original_width = 1280;
+    const int original_height = 720;
     
-    sensor_msgs::PointCloud2Modifier modifier(rgb_cloud);
-    modifier.setPointCloud2Fields(4,
-        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "rgb", 1, sensor_msgs::msg::PointField::UINT32
-    );
+    // 目标裁剪尺寸
+    const int target_width = 640;
+    const int target_height = 480;
     
-    sensor_msgs::PointCloud2Iterator<float> iter_x(rgb_cloud, "x");
-    sensor_msgs::PointCloud2Iterator<float> iter_y(rgb_cloud, "y");
-    sensor_msgs::PointCloud2Iterator<float> iter_z(rgb_cloud, "z");
-    sensor_msgs::PointCloud2Iterator<uint32_t> iter_rgb(rgb_cloud, "rgb");
+    // 计算裁剪区域的起始位置（居中裁剪）
+    const int start_x = (original_width - target_width) / 2;
+    const int start_y = (original_height - target_height) / 2;
+    const int end_x = start_x + target_width;
+    const int end_y = start_y + target_height;
     
-    // 填充RGB点云数据（毫米转米）
-    for (size_t i = 0; i < total_points; ++i) {
-        *iter_x = points[i].x * 0.001f;
-        *iter_y = points[i].y * 0.001f;
-        *iter_z = points[i].z * 0.001f;
-        
-        uint32_t r = points[i].r;
-        uint32_t g = points[i].g;
-        uint32_t b = points[i].b;
-        *iter_rgb = (r << 16) | (g << 8) | b;
-        
-        ++iter_x; ++iter_y; ++iter_z; ++iter_rgb;
+    // 首先统计有效点数
+    const float min_distance = 0.02f; // 20mm in meters
+    size_t valid_count = 0;
+    
+    // 预计算变换矩阵以提高性能
+    Eigen::Matrix3f transform_matrix = T_camera_to_base_.rotation();
+    Eigen::Vector3f transform_translation = T_camera_to_base_.translation();
+    
+    // 第一步：统计有效点数量
+    for (int y = start_y; y < end_y; y += this->downsample_ratio_) {
+        for (int x = start_x; x < end_x; x += this->downsample_ratio_) {
+            size_t index = y * original_width + x;
+            if (index < total_points && points[index].z * 0.001f >= min_distance) {
+                valid_count++;
+            }
+        }
     }
     
-    // 转换为强度点云
-    sensor_msgs::msg::PointCloud2 intensity_cloud;
-    intensity_cloud.header = rgb_cloud.header;
-    intensity_cloud.height = rgb_cloud.height;
-    intensity_cloud.width = rgb_cloud.width;
-    intensity_cloud.is_dense = rgb_cloud.is_dense;
+    if (valid_count == 0) {
+        RCLCPP_WARN(this->get_logger(), "No valid points found in point cloud");
+        return output;
+    }
     
-    sensor_msgs::PointCloud2Modifier intensity_modifier(intensity_cloud);
-    intensity_modifier.setPointCloud2Fields(4,
+    // 创建点云 - 使用更高效的方法
+    output.header.stamp = this->now();
+    output.header.frame_id = output_frame;
+    output.height = 1;
+    output.width = valid_count;
+    output.is_dense = false;
+    output.is_bigendian = false;
+    
+    // 设置点云字段
+    sensor_msgs::PointCloud2Modifier modifier(output);
+    modifier.setPointCloud2Fields(4,
         "x", 1, sensor_msgs::msg::PointField::FLOAT32,
         "y", 1, sensor_msgs::msg::PointField::FLOAT32,
         "z", 1, sensor_msgs::msg::PointField::FLOAT32,
         "intensity", 1, sensor_msgs::msg::PointField::FLOAT32
     );
     
-    sensor_msgs::PointCloud2ConstIterator<float> in_x(rgb_cloud, "x");
-    sensor_msgs::PointCloud2ConstIterator<float> in_y(rgb_cloud, "y");
-    sensor_msgs::PointCloud2ConstIterator<float> in_z(rgb_cloud, "z");
-    sensor_msgs::PointCloud2ConstIterator<uint32_t> in_rgb(rgb_cloud, "rgb");
+    modifier.resize(valid_count);
     
-    sensor_msgs::PointCloud2Iterator<float> out_x(intensity_cloud, "x");
-    sensor_msgs::PointCloud2Iterator<float> out_y(intensity_cloud, "y");
-    sensor_msgs::PointCloud2Iterator<float> out_z(intensity_cloud, "z");
-    sensor_msgs::PointCloud2Iterator<float> out_intensity(intensity_cloud, "intensity");
+    // 获取数据指针
+    uint8_t* data_ptr = output.data.data();
+    const size_t point_step = output.point_step;
     
-    // 转换为强度并过滤无效点
-    size_t valid_count = 0;
-    const float min_distance = 0.02f; // 20mm in meters
-    
-    for (size_t i = 0; i < total_points; ++i) {
-        // 跳过无效点
-        if (*in_z < min_distance || std::isnan(*in_z)) {
-            ++in_x; ++in_y; ++in_z; ++in_rgb;
-            continue;
+    // 第二步：填充有效点数据
+    size_t output_idx = 0;
+    for (int y = start_y; y < end_y; y += this->downsample_ratio_) {
+        for (int x = start_x; x < end_x; x += this->downsample_ratio_) {
+            size_t index = y * original_width + x;
+            if (index >= total_points || points[index].z * 0.001f < min_distance) continue;
+            
+            // 计算强度
+            float intensity = 0.299f * points[index].r + 0.587f * points[index].g + 0.114f * points[index].b;
+            
+            // 坐标转换和毫米转米一步完成
+            Eigen::Vector3f point_camera(
+                points[index].x * 0.001f,
+                points[index].y * 0.001f,
+                points[index].z * 0.001f
+            );
+            
+            // 应用坐标轴变换
+            Eigen::Vector3f point_transformed(
+                point_camera.z(),      // Z -> X
+                -point_camera.x(),     // -X -> Y
+                -point_camera.y()      // -Y -> Z
+            );
+            
+            // 应用预计算的静态变换
+            Eigen::Vector3f point_base = transform_matrix * point_transformed + transform_translation;
+            
+            // 直接写入内存
+            size_t offset = output_idx * point_step;
+            float* x_ptr = reinterpret_cast<float*>(data_ptr + offset);
+            float* y_ptr = reinterpret_cast<float*>(data_ptr + offset + 4);
+            float* z_ptr = reinterpret_cast<float*>(data_ptr + offset + 8);
+            float* intensity_ptr = reinterpret_cast<float*>(data_ptr + offset + 12);
+            
+            *x_ptr = point_base.x();
+            *y_ptr = point_base.y();
+            *z_ptr = point_base.z();
+            *intensity_ptr = intensity;
+            
+            output_idx++;
         }
-        
-        // 提取RGB分量
-        uint32_t rgb_val = *in_rgb;
-        uint8_t r = (rgb_val >> 16) & 0xFF;
-        uint8_t g = (rgb_val >> 8) & 0xFF;
-        uint8_t b = rgb_val & 0xFF;
-        
-        // 计算强度
-        float intensity = 0.299f * r + 0.587f * g + 0.114f * b;
-        
-        // 填充输出点云
-        *out_x = *in_z;
-        *out_y = -(*in_x);
-        *out_z = -(*in_y);
-        *out_intensity = intensity;
-        
-        ++valid_count;
-        ++in_x; ++in_y; ++in_z; ++in_rgb;
-        ++out_x; ++out_y; ++out_z; ++out_intensity;
     }
     
-    // 调整点云大小以匹配有效点数
-    intensity_cloud.width = valid_count;
-    intensity_cloud.row_step = intensity_cloud.width * intensity_cloud.point_step;
-    intensity_cloud.data.resize(intensity_cloud.row_step * intensity_cloud.height);
+    // 计算并输出耗时
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     
-    // 坐标系转换 - 使用 tf_buffer_->transform()
-    try {
-        // 使用 transform() 方法替代 doTransform()
-        output = tf_buffer_->transform(
-            intensity_cloud,
-            output_frame,
-            tf2::durationFromSec(0.1)  // 超时时间
-        );
-        
-        if (debug) {
-            RCLCPP_INFO(this->get_logger(), 
-                "Transformed point cloud from %s to %s (%zu points)",
-                input_frame.c_str(), output_frame.c_str(), valid_count);
-        }
-    } catch (tf2::TransformException &ex) {
-        RCLCPP_WARN(this->get_logger(), 
-            "Point cloud transform failed: %s. Using original frame.", 
-            ex.what());
-        output = intensity_cloud;
-        output.header.frame_id = output_frame;
+    if (debug) {
+        RCLCPP_INFO(this->get_logger(), 
+            "Point cloud conversion completed in %.2f ms (%.2f μs) - Input: %zu points, Output: %zu points, Downsample ratio: %d, Cropped to: %dx%d", 
+            duration.count() / 1000.0, 
+            static_cast<double>(duration.count()),
+            total_points, 
+            valid_count, 
+            this->downsample_ratio_,
+            target_width, target_height);
+    } else {
+        RCLCPP_DEBUG(this->get_logger(), 
+            "Point cloud conversion: %.2f ms - %zu → %zu points (ratio: %d, crop: %dx%d)", 
+            duration.count() / 1000.0,
+            total_points, 
+            valid_count, 
+            this->downsample_ratio_,
+            target_width, target_height);
     }
     
     return output;

@@ -44,6 +44,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(OrbbecSDK REQUIRED)
+find_package(OpenMP REQUIRED)
 # Find external non-ROS dependencies
 find_package(Sophus REQUIRED)
 find_package(Pangolin REQUIRED)
@@ -83,7 +84,7 @@ add_executable(rgbd
   src/rgbd/rgbd-slam-node-new.cpp
 )
 ament_target_dependencies(rgbd rclcpp sensor_msgs tf2 tf2_ros cv_bridge message_filters ORB_SLAM3 Pangolin nav_msgs tf2_sensor_msgs tf2_geometry_msgs)
-target_link_libraries(rgbd ${OpenCV_LIBRARIES} OrbbecSDK::OrbbecSDK)
+target_link_libraries(rgbd ${OpenCV_LIBRARIES} OrbbecSDK::OrbbecSDK ${OpenMP_CXX_FLAGS})
 
 # # Stereo Node
 #add_executable(stereo
