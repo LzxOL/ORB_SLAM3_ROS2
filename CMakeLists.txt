@@ -84,7 +84,7 @@ add_executable(rgbd
   src/rgbd/rgbd-slam-node-new.cpp
 )
 ament_target_dependencies(rgbd rclcpp sensor_msgs tf2 tf2_ros cv_bridge message_filters ORB_SLAM3 Pangolin nav_msgs tf2_sensor_msgs tf2_geometry_msgs)
-target_link_libraries(rgbd ${OpenCV_LIBRARIES} OrbbecSDK::OrbbecSDK ${OpenMP_CXX_FLAGS})
+target_link_libraries(rgbd ${OpenCV_LIBRARIES} OrbbecSDK::OrbbecSDK ${OpenMP_CXX_FLAGS} OpenMP::OpenMP_CXX)
 
 # # Stereo Node
 #add_executable(stereo

@@ -186,6 +186,12 @@ private:
     int downsample_ratio_ = 1; // 点云下采样比例
     bool use_openmp_ = true;
 
+    sensor_msgs::msg::PointCloud2 convertToDepthPointCloudInMapFrame(
+        std::shared_ptr<ob::Frame> frame, 
+        const std::string& input_frame,
+        const std::string& output_frame,
+        bool debug);
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr depth_pointcloud_publisher_;
 };
 
 #endif // __RGBD_SLAM_NODE_HPP__

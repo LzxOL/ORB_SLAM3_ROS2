@@ -63,7 +63,7 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
     this->declare_parameter<bool>("use_pose_prediction", true);
     this->declare_parameter<double>("max_prediction_time", 1.0);
     this->declare_parameter<std::string>("pointcloud_frame_id", "camera_link");
-    this->declare_parameter<double>("pointcloud_interval", 0.05);  // 改为0.05秒(20Hz)
+    this->declare_parameter<double>("pointcloud_interval", 0.01);  // 改为0.05秒(20Hz)
 
     this->declare_parameter<bool>("publish_pointcloud", true);
     this->declare_parameter<bool>("debug_pointcloud", true);
@@ -71,7 +71,7 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
     
     this->declare_parameter<std::string>("my_map_frame_id", "my_map");
     this->declare_parameter<bool>("use_openmp", false);  // 禁用OpenMP参数
-    this->declare_parameter<int>("pointcloud_downsample_ratio", 6);  // 下采样比例
+    this->declare_parameter<int>("pointcloud_downsample_ratio", 8);  // 下采样比例
     
     // 获取参数
     this->get_parameter("my_map_frame_id", my_map_frame_id_);
@@ -150,10 +150,10 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
         
         T_camera_to_base_ = translation * rotation;
         
-        // RCLCPP_INFO(this->get_logger(), 
-        //            "Precomputed static transform from %s to %s",
-        //            pointcloud_frame_id_.c_str(), 
-        //            pointcloud_output_frame_.c_str());
+        RCLCPP_INFO(this->get_logger(), 
+                   "Precomputed static transform from %s to %s",
+                   pointcloud_frame_id_.c_str(), 
+                   pointcloud_output_frame_.c_str());
     } catch (tf2::TransformException &ex) {
         RCLCPP_WARN(this->get_logger(), 
                    "Failed to get static transform: %s. Using identity transform.", 
@@ -186,8 +186,8 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
     
     static_tf_broadcaster_->sendTransform(static_tf_map_my_map);
     
-    // RCLCPP_INFO(this->get_logger(), "Published static transform from %s to %s",
-    //             map_frame_id_.c_str(), my_map_frame_id_.c_str());
+    RCLCPP_INFO(this->get_logger(), "Published static transform from %s to %s",
+                map_frame_id_.c_str(), my_map_frame_id_.c_str());
     
     // 初始化位姿连续性相关变量
     has_valid_pose_ = false;
@@ -256,8 +256,8 @@ RgbdSlamNode::RgbdSlamNode(ORB_SLAM3::System* pSLAM)
         auto camera_param = pipeline->getCameraParam();
         pointCloud.setCameraParam(camera_param);
         
-        // RCLCPP_INFO(this->get_logger(), "Orbbec camera initialized successfully with resolution %dx%d", 
-        //            camera_width, camera_height);
+        RCLCPP_INFO(this->get_logger(), "Orbbec camera initialized successfully with resolution %dx%d", 
+                   camera_width, camera_height);
         last_pointcloud_time_ = this->now();
         
         // 启动SLAM处理线程
@@ -335,9 +335,9 @@ void RgbdSlamNode::ProcessFrame()
                             
                             if (debug_pointcloud_) {
                                 size_t point_count = cloud_msg.width * cloud_msg.height;
-                                // RCLCPP_INFO(this->get_logger(), 
-                                //     "Published intensity point cloud: %zu points to frame %s", 
-                                //     point_count, cloud_msg.header.frame_id.c_str());
+                                RCLCPP_INFO(this->get_logger(), 
+                                    "Published intensity point cloud: %zu points to frame %s", 
+                                    point_count, cloud_msg.header.frame_id.c_str());
                             }
                         }
                     } catch (const std::exception& e) {
@@ -410,134 +410,165 @@ void RgbdSlamNode::ProcessFrame()
             
             odom_publisher_->publish(std::move(odom_msg));
             // 打印base_link的位姿（便于调试）
-            // RCLCPP_INFO(this->get_logger(), "base_link Position in my_map frame: [%.2f, %.2f, %.2f]", 
-            //         t.x(), t.y(), t.z());
+            RCLCPP_INFO(this->get_logger(), "base_link Position in my_map frame: [%.2f, %.2f, %.2f]", 
+                    t.x(), t.y(), t.z());
         }
     }
 }
 
-sensor_msgs::msg::PointCloud2 RgbdSlamNode::convertToIntensityPointCloudInMapFrame(
-    std::shared_ptr<ob::Frame> frame, 
-    const std::string& input_frame,
-    const std::string& output_frame,
-    bool debug)
-{
-    (void)input_frame; // 避免未使用参数警告
-    (void)debug;       // 避免未使用参数警告
-
-    sensor_msgs::msg::PointCloud2 output;
-    
-    if (!frame->is<ob::PointsFrame>()) {
-        RCLCPP_ERROR(this->get_logger(), "Frame is not a PointsFrame!");
-        return output;
-    }
-    
-    auto points_frame = frame->as<ob::PointsFrame>();
-    auto* points = static_cast<OBColorPoint*>(points_frame->data());
-    size_t total_points = points_frame->dataSize() / sizeof(OBColorPoint);
-    
-    // 原始图像尺寸
-    const int original_width = 1280;
-    const int original_height = 720;
-    
-    // 目标裁剪尺寸
-    const int target_width = 640;
-    const int target_height = 480;
-    
-    // 计算裁剪区域的起始位置（居中裁剪）
-    const int start_x = (original_width - target_width) / 2;
-    const int start_y = (original_height - target_height) / 2;
-    const int end_x = start_x + target_width;
-    const int end_y = start_y + target_height;
-    
-    // 首先统计有效点数
-    const float min_distance = 0.02f; // 20mm in meters
-    size_t valid_count = 0;
-    
-    // 预计算变换矩阵以提高性能
-    Eigen::Matrix3f transform_matrix = T_camera_to_base_.rotation();
-    Eigen::Vector3f transform_translation = T_camera_to_base_.translation();
-    
-    // 第一步：统计有效点数量
-    for (int y = start_y; y < end_y; y += this->downsample_ratio_) {
-        for (int x = start_x; x < end_x; x += this->downsample_ratio_) {
-            size_t index = y * original_width + x;
-            if (index < total_points && points[index].z * 0.001f >= min_distance) {
-                valid_count++;
-            }
-        }
-    }
-    
-    if (valid_count == 0) {
-        RCLCPP_WARN(this->get_logger(), "No valid points found in point cloud");
-        return output;
-    }
-    
-    // 创建点云 - 使用更高效的方法
-    output.header.stamp = this->now();
-    output.header.frame_id = output_frame;
-    output.height = 1;
-    output.width = valid_count;
-    output.is_dense = false;
-    output.is_bigendian = false;
-    
-    // 设置点云字段
-    sensor_msgs::PointCloud2Modifier modifier(output);
-    modifier.setPointCloud2Fields(4,
-        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-        "intensity", 1, sensor_msgs::msg::PointField::FLOAT32
-    );
-    
-    modifier.resize(valid_count);
-    
-    // 获取数据指针
-    uint8_t* data_ptr = output.data.data();
-    const size_t point_step = output.point_step;
-    
-    // 第二步：填充有效点数据
-    size_t output_idx = 0;
-    for (int y = start_y; y < end_y; y += this->downsample_ratio_) {
-        for (int x = start_x; x < end_x; x += this->downsample_ratio_) {
-            size_t index = y * original_width + x;
-            if (index >= total_points || points[index].z * 0.001f < min_distance) continue;
-            
-            // 计算强度
-            float intensity = 0.299f * points[index].r + 0.587f * points[index].g + 0.114f * points[index].b;
-            
-            // 坐标转换和毫米转米一步完成
-            Eigen::Vector3f point_camera(
-                points[index].x * 0.001f,
-                points[index].y * 0.001f,
-                points[index].z * 0.001f
-            );
-            
-            // 应用坐标轴变换
-            Eigen::Vector3f point_transformed(
-                point_camera.z(),      // Z -> X
-                -point_camera.x(),     // -X -> Y
-                -point_camera.y()      // -Y -> Z
-            );
-            
-            // 应用预计算的静态变换
-            Eigen::Vector3f point_base = transform_matrix * point_transformed + transform_translation;
-            
-            // 直接写入内存
-            size_t offset = output_idx * point_step;
-            float* x_ptr = reinterpret_cast<float*>(data_ptr + offset);
-            float* y_ptr = reinterpret_cast<float*>(data_ptr + offset + 4);
-            float* z_ptr = reinterpret_cast<float*>(data_ptr + offset + 8);
-            float* intensity_ptr = reinterpret_cast<float*>(data_ptr + offset + 12);
-            
-            *x_ptr = point_base.x();
-            *y_ptr = point_base.y();
-            *z_ptr = point_base.z();
-            *intensity_ptr = intensity;
-            
-            output_idx++;
-        }
-    }
-    
-    return output;
+sensor_msgs::msg::PointCloud2 RgbdSlamNode::convertToIntensityPointCloudInMapFrame(  
+    std::shared_ptr<ob::Frame> frame,   
+    const std::string& input_frame,  
+    const std::string& output_frame,  
+    bool debug)  
+{  
+    // auto start_time = std::chrono::high_resolution_clock::now();  
+    sensor_msgs::msg::PointCloud2 output;  
+  
+    // 基础校验  
+    if (!frame->is<ob::PointsFrame>()) {  
+        RCLCPP_ERROR(this->get_logger(), "Frame is not a PointsFrame!");  
+        return output;  
+    }  
+  
+    // 获取点云数据  
+    auto points_frame = frame->as<ob::PointsFrame>();  
+    const OBColorPoint* points = static_cast<OBColorPoint*>(points_frame->data());  
+    const size_t total_points = points_frame->dataSize() / sizeof(OBColorPoint);  
+  
+    // 图像参数配置  
+    constexpr int ORIGINAL_WIDTH = 1280;  
+    constexpr int ORIGINAL_HEIGHT = 720;  
+    constexpr int TARGET_WIDTH = 640;  
+    constexpr int TARGET_HEIGHT = 480;  
+    constexpr int START_X = (ORIGINAL_WIDTH - TARGET_WIDTH) / 2;  
+    constexpr int START_Y = (ORIGINAL_HEIGHT - TARGET_HEIGHT) / 2;  
+    constexpr float MIN_DISTANCE = 0.02f;  // 20mm  
+  
+    // 预计算变换参数  
+    const Eigen::Matrix3f rotation = T_camera_to_base_.rotation();  
+    const Eigen::Vector3f translation = T_camera_to_base_.translation();  
+  
+    // 阶段1：并行统计有效点数  
+    size_t valid_count = 0;  
+    const int y_step = this->downsample_ratio_;  
+    const int x_step = this->downsample_ratio_;  
+  
+    #pragma omp parallel for reduction(+:valid_count) if(use_openmp_)  
+    for (int y = START_Y; y < START_Y + TARGET_HEIGHT; y += y_step) {  
+        for (int x = START_X; x < START_X + TARGET_WIDTH; x += x_step) {  
+            const size_t index = y * ORIGINAL_WIDTH + x;  
+            if (index < total_points && points[index].z * 0.001f >= MIN_DISTANCE) {  
+                valid_count++;  
+            }  
+        }  
+    }  
+  
+    if (valid_count == 0) {  
+        RCLCPP_WARN(this->get_logger(), "No valid points found in point cloud");  
+        return output;  
+    }  
+  
+    // 阶段2：初始化ROS点云消息  
+    output.header.stamp = this->now();  
+    output.header.frame_id = output_frame;  
+    output.height = 1;  
+    output.width = valid_count;  
+    output.is_dense = false;  
+  
+    // 设置点云字段  
+    sensor_msgs::PointCloud2Modifier modifier(output);  
+    modifier.setPointCloud2Fields(4,  
+        "x", 1, sensor_msgs::msg::PointField::FLOAT32,  
+        "y", 1, sensor_msgs::msg::PointField::FLOAT32,  
+        "z", 1, sensor_msgs::msg::PointField::FLOAT32,  
+        "intensity", 1, sensor_msgs::msg::PointField::FLOAT32  
+    );  
+    modifier.resize(valid_count);  
+  
+    // 阶段3：并行填充数据  
+    const size_t point_step = output.point_step;  
+    uint8_t* const data_ptr = output.data.data();  
+    const int chunk_size = 256;  // 每个线程处理的数据块大小  
+  
+    // 使用原子变量跟踪写入位置  
+    std::atomic<size_t> write_offset(0);  
+  
+    #pragma omp parallel for schedule(dynamic, chunk_size) if(use_openmp_)  
+    for (int y = START_Y; y < START_Y + TARGET_HEIGHT; y += y_step) {  
+        // 线程本地缓冲区  
+        std::vector<std::array<float, 4>> local_buffer;  
+        local_buffer.reserve(chunk_size);  
+  
+        // 处理当前行块  
+        for (int x = START_X; x < START_X + TARGET_WIDTH; x += x_step) {  
+            const size_t index = y * ORIGINAL_WIDTH + x;  
+            if (index >= total_points || points[index].z * 0.001f < MIN_DISTANCE) {  
+                continue;  
+            }  
+  
+            // 坐标转换（毫米转米）  
+            const Eigen::Vector3f point_camera(  
+                points[index].x * 0.001f,  
+                points[index].y * 0.001f,  
+                points[index].z * 0.001f  
+            );  
+  
+            // 坐标系变换  
+            const Eigen::Vector3f point_transformed(  
+                point_camera.z(),      // Z -> X  
+                -point_camera.x(),     // -X -> Y  
+                -point_camera.y()      // -Y -> Z  
+            );  
+  
+            const Eigen::Vector3f point_base = rotation * point_transformed + translation;  
+  
+            // 计算灰度强度  
+            const float intensity = 0.299f * points[index].r +   
+                                  0.587f * points[index].g +   
+                                  0.114f * points[index].b;  
+  
+            // 存储到本地缓冲区  
+            local_buffer.push_back({  
+                point_base.x(),  
+                point_base.y(),  
+                point_base.z(),  
+                intensity  
+            });  
+        }  
+  
+        // 批量写入全局内存  
+        if (!local_buffer.empty()) {  
+            // 获取当前写入位置  
+            size_t current_offset = write_offset.fetch_add(local_buffer.size(), std::memory_order_relaxed);  
+  
+            // 内存连续拷贝  
+            size_t write_pos = current_offset * point_step;  
+            for (const auto& point : local_buffer) {  
+                // 检查写入位置是否越界  
+                if (write_pos + point_step > output.data.size()) {  
+                    RCLCPP_ERROR(this->get_logger(), "Memory write out of bounds!");  
+                    break;  
+                }  
+                *reinterpret_cast<float*>(data_ptr + write_pos) = point[0];  
+                *reinterpret_cast<float*>(data_ptr + write_pos + 4) = point[1];  
+                *reinterpret_cast<float*>(data_ptr + write_pos + 8) = point[2];  
+                *reinterpret_cast<float*>(data_ptr + write_pos + 12) = point[3];  
+                write_pos += point_step;  
+            }  
+        }  
+    }  
+  
+    // // 性能统计  
+    // if (debug) {  
+    //     const auto end_time = std::chrono::high_resolution_clock::now();  
+    //     const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);  
+    //     RCLCPP_INFO(this->get_logger(),   
+    //         "Point cloud processed in %.2f ms - Input: %zu points, Output: %zu points",  
+    //         duration.count() / 1000.0,  
+    //         total_points,  
+    //         valid_count);  
+    // }  
+  
+    return output;  
 }
